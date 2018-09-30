@@ -1,0 +1,28 @@
+public enum InstType {
+	ADDI, ADD, BEQ, ...
+}
+
+Instruction {
+	int address
+	byte[4] word
+	InstType type
+}
+
+Processor {
+	byte[] memory
+	pc int
+	void execute() {
+		execute(new Instruction(memory[pc]));
+		pc += 4;
+	}
+	void execute(Instruction inst) {
+		switch inst.type {
+			case ADDI:
+				execute(new InstAddi(inst));
+				break;
+		}
+	}
+}
+	
+	
+		
