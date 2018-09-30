@@ -99,7 +99,7 @@ public class AppTest
                 "00100000" + "11000000" + "00000000" + "00000000",
                 "01000000" + "01000000" + "00000000" + "00000011",
                 "00000100" + "00100010" + "00000000" + "00001010"
-            ))), // 00111111 -> 01000000
+            ))),
             new byte[] {
                 32, 32, 0, 0,
                 32, -64, 0, 0,
@@ -107,5 +107,46 @@ public class AppTest
                 4, 34, 0, 10
             }
         );
+    }
+
+    public void testGetInstType() {
+        assertEquals(InstType.J, Instruction.getInstType(0));
+        assertEquals(InstType.BEQ, Instruction.getInstType(1 << 2));
+        assertEquals(InstType.BNE, Instruction.getInstType(2 << 2));
+        assertEquals(InstType.BGTZ, Instruction.getInstType(3 << 2));
+        assertEquals(InstType.SW, Instruction.getInstType(4 << 2));
+        assertEquals(InstType.LW, Instruction.getInstType(5 << 2));
+        assertEquals(InstType.BREAK, Instruction.getInstType(6 << 2));
+        assertEquals(InstType.ADD, Instruction.getInstType(1 << 5));
+        assertEquals(InstType.SUB, Instruction.getInstType(1 << 5 | 1 << 2));
+        assertEquals(InstType.AND, Instruction.getInstType(1 << 5 | 2 << 2));
+        assertEquals(InstType.OR, Instruction.getInstType(1 << 5 | 3 << 2));
+        assertEquals(InstType.SRL, Instruction.getInstType(1 << 5 | 4 << 2));
+        assertEquals(InstType.SRA, Instruction.getInstType(1 << 5 | 5 << 2));
+        assertEquals(InstType.ADDI, Instruction.getInstType(1 << 6));
+        assertEquals(InstType.ANDI, Instruction.getInstType(1 << 6 | 1 << 2));
+        assertEquals(InstType.ORI, Instruction.getInstType(1 << 6 | 2 << 2));
+        assertEquals(InstType.MULT, Instruction.getInstType(3 << 5));
+        assertEquals(InstType.DIV, Instruction.getInstType(3 << 5 | 1 << 2));
+        assertEquals(InstType.MFHI, Instruction.getInstType(1 << 7));
+        assertEquals(InstType.MFLO, Instruction.getInstType(1 << 7 | 1 << 2));
+    }
+
+    public void testByteIndex() {
+        char[] chars = new char[] {'a', 'b', 'd', 'l'};
+        byte index = 0;
+        assertEquals('a', chars[index]);
+        index = 2;
+        assertEquals('d', chars[index]);
+    }
+
+    public void testInstToString() {
+        assertEquals("00100000001000000000000000000000\t256\tADD R1, R0, R0",
+            Instruction.decode(256, "00100000001000000000000000000000")
+        );
+    }
+
+    public void testInstCat2() {
+
     }
 }
