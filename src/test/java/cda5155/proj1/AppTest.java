@@ -29,32 +29,29 @@ public class AppTest
         return new TestSuite( AppTest.class );
     }
 
-    public void testString2Byte() {
-        assertEquals(App.string2Byte("00000000"), 0);
-        assertEquals(App.string2Byte("00000001"), 1);
-        assertEquals(App.string2Byte("00000010"), 2);
-        assertEquals(App.string2Byte("00000011"), 3);
-        assertEquals(App.string2Byte("01000011"), 67);
-        assertEquals(App.string2Byte("10000000"), -128);
-        assertEquals(App.string2Byte("10100111"), -89); // -01011000 -> -01011001 -> -89
-        assertEquals(App.string2Byte("11111111"), -1); // -00000000 -> -00000001 -> -1
+    public static void testString2word() {
+        assertEquals(0, Memory.string2word("00000000000000000000000000000000"));
+        assertEquals(1, Memory.string2word("00000000000000000000000000000001"));
+        assertEquals(1 << 31, Memory.string2word("10000000000000000000000000000000"));
+        assertEquals(-1, Memory.string2word("11111111111111111111111111111111"));
+        assertEquals(1 << 27, Memory.string2word("00001000000000000000000000000000"));
+        assertEquals(1 << 27 | 1 << 3, Memory.string2word("00001000000000000000000000001000"));
+        assertEquals(-2, Memory.string2word("11111111111111111111111111111110"));
     }
 
-    public static void testByte2String() {
-        assertEquals(App.byte2String((byte)0), "00000000");
-        assertEquals(App.byte2String((byte)1), "00000001");
-        assertEquals(App.byte2String((byte)2), "00000010");
-        assertEquals(App.byte2String((byte)3), "00000011");
-        assertEquals(App.byte2String((byte)67), "01000011");
-        assertEquals(App.byte2String((byte)-128), "10000000");
-        assertEquals(App.byte2String((byte)-89), "10100111");
-        assertEquals(App.byte2String((byte)-1), "11111111");
+    public static void testWord2string() {
+        assertEquals("00000000000000000000000000000000", Memory.word2string(0));
+        assertEquals("00000000000000000000000000000001", Memory.word2string(1));
+        assertEquals("10000000000000000000000000000000", Memory.word2string(1 << 31));
+        assertEquals("11111111111111111111111111111111", Memory.word2string(-1));
+        assertEquals("00001000000000000000000000000000", Memory.word2string(1 << 27));
+        assertEquals("00001000000000000000000000001000", Memory.word2string(1 << 27 | 1 << 3));
+        assertEquals("11111111111111111111111111111110", Memory.word2string(-2));
     }
 
-    public static void assertMemoryEqual(byte[] memory, byte[] content) {
-        assertEquals(memory.length - 256, content.length);
-        for (int k = 0; k < content.length; ++k) {
-            assertEquals(memory[256 + k], content[k]);
+    public static void assertMemoryEqual(Memory memory, int[] contents) {
+        for (int k = 0; k < contents.length; ++k) {
+            assertEquals(memory.fetch(4 * k + 256), contents[k]);
         }
     }
 
@@ -66,87 +63,117 @@ public class AppTest
             output.add(tokenizer.nextToken());
         }
         return output;
-    }  
+    }
 
     public void testCreateMemory() {
         assertMemoryEqual(
-            App.createMemory(splitLines("00000000000000000000000000000000")),
-            new byte[] {0, 0, 0, 0}
+            new Memory(splitLines("00000000000000000000000000000000")),
+            new int[] {0}
         );
         assertMemoryEqual(
-            App.createMemory(splitLines("00000000000000000000000000000001")),
-            new byte[] {0, 0, 0, 1}
+            new Memory(splitLines("00000000000000000000000000000001")),
+            new int[] {1}
         );
         assertMemoryEqual(
-            App.createMemory(splitLines("00000001000000000000000000000000")),
-            new byte[] {1, 0, 0, 0}
+            new Memory(splitLines("00000001000000010000000000000000")),
+            new int[] {1 << 24 | 1 << 16}
         );
         assertMemoryEqual(
-            App.createMemory(splitLines("00000001000000010000000000000000")),
-            new byte[] {1, 1, 0, 0}
-        );
-        assertMemoryEqual(
-            App.createMemory(splitLines("00000000000000010000000100000000")),
-            new byte[] {0, 1, 1, 0}
-        );
-        assertMemoryEqual(
-            App.createMemory(splitLines("00000001000000010000000000000000\n00000000000000010000000100000000")),
-            new byte[] {1, 1, 0, 0, 0, 1, 1, 0}
-        );
-        assertMemoryEqual(
-            App.createMemory(splitLines(String.join("\n",
-                "00100000" + "00100000" + "00000000" + "00000000",
-                "00100000" + "11000000" + "00000000" + "00000000",
-                "01000000" + "01000000" + "00000000" + "00000011",
-                "00000100" + "00100010" + "00000000" + "00001010"
+            new Memory(splitLines(String.join("\n",
+                "00000000000000000000000000000001",
+                "00000000000000000000000000000010",
+                "00000000000000000000000000000011"
             ))),
-            new byte[] {
-                32, 32, 0, 0,
-                32, -64, 0, 0,
-                64, 64, 0, 3,
-                4, 34, 0, 10
-            }
+            new int[] {1, 2, 3}
         );
+        assertMemoryEqual(
+            new Memory(splitLines(String.join("\n",
+                "00000000000000000000000000000000",
+                "00000000000000000000000000000001",
+                "10000000000000000000000000000000",
+                "11111111111111111111111111111111",
+                "11111111111111111111111111111110"
+            ))),
+            new int[] {0, 1, 1 << 31, -1, -2}
+        );
+    }
+
+    public void testGetFirst3Bits() {
+        assertEquals(0, Instruction.getFirst3Bits(0));
+        assertEquals(1, Instruction.getFirst3Bits(1 << 29));
+        assertEquals(2, Instruction.getFirst3Bits(1 << 30));
+        assertEquals(3, Instruction.getFirst3Bits(1 << 30 | 1 << 29));
+        assertEquals(4, Instruction.getFirst3Bits(1 << 31));
+        assertEquals(5, Instruction.getFirst3Bits(1 << 31 | 1 << 29));
+        assertEquals(6, Instruction.getFirst3Bits(1 << 31 | 1 << 30));
+        assertEquals(7, Instruction.getFirst3Bits(1 << 31 | 1 << 30 | 1 << 29));
+    }
+
+    public void testGetSecond3Bits() {
+        assertEquals(0, Instruction.getSecond3Bits(0));
+        assertEquals(1, Instruction.getSecond3Bits(1 << 26));
+        assertEquals(2, Instruction.getSecond3Bits(1 << 27));
+        assertEquals(3, Instruction.getSecond3Bits(1 << 27 | 1 << 26));
+        assertEquals(4, Instruction.getSecond3Bits(1 << 28));
+        assertEquals(5, Instruction.getSecond3Bits(1 << 28 | 1 << 26));
+        assertEquals(6, Instruction.getSecond3Bits(1 << 28 | 1 << 27));
+        assertEquals(7, Instruction.getSecond3Bits(1 << 28 | 1 << 27 | 1 << 26));
     }
 
     public void testGetInstType() {
         assertEquals(InstType.J, Instruction.getInstType(0));
-        assertEquals(InstType.BEQ, Instruction.getInstType(1 << 2));
-        assertEquals(InstType.BNE, Instruction.getInstType(2 << 2));
-        assertEquals(InstType.BGTZ, Instruction.getInstType(3 << 2));
-        assertEquals(InstType.SW, Instruction.getInstType(4 << 2));
-        assertEquals(InstType.LW, Instruction.getInstType(5 << 2));
-        assertEquals(InstType.BREAK, Instruction.getInstType(6 << 2));
-        assertEquals(InstType.ADD, Instruction.getInstType(1 << 5));
-        assertEquals(InstType.SUB, Instruction.getInstType(1 << 5 | 1 << 2));
-        assertEquals(InstType.AND, Instruction.getInstType(1 << 5 | 2 << 2));
-        assertEquals(InstType.OR, Instruction.getInstType(1 << 5 | 3 << 2));
-        assertEquals(InstType.SRL, Instruction.getInstType(1 << 5 | 4 << 2));
-        assertEquals(InstType.SRA, Instruction.getInstType(1 << 5 | 5 << 2));
-        assertEquals(InstType.ADDI, Instruction.getInstType(1 << 6));
-        assertEquals(InstType.ANDI, Instruction.getInstType(1 << 6 | 1 << 2));
-        assertEquals(InstType.ORI, Instruction.getInstType(1 << 6 | 2 << 2));
-        assertEquals(InstType.MULT, Instruction.getInstType(3 << 5));
-        assertEquals(InstType.DIV, Instruction.getInstType(3 << 5 | 1 << 2));
-        assertEquals(InstType.MFHI, Instruction.getInstType(1 << 7));
-        assertEquals(InstType.MFLO, Instruction.getInstType(1 << 7 | 1 << 2));
-    }
-
-    public void testByteIndex() {
-        char[] chars = new char[] {'a', 'b', 'd', 'l'};
-        byte index = 0;
-        assertEquals('a', chars[index]);
-        index = 2;
-        assertEquals('d', chars[index]);
-    }
-
-    public void testInstToString() {
-        assertEquals("00100000001000000000000000000000\t256\tADD R1, R0, R0",
-            Instruction.decode(256, "00100000001000000000000000000000")
-        );
+        assertEquals(InstType.BEQ, Instruction.getInstType(1 << 26));
+        assertEquals(InstType.BNE, Instruction.getInstType(2 << 26));
+        assertEquals(InstType.BGTZ, Instruction.getInstType(3 << 26));
+        assertEquals(InstType.SW, Instruction.getInstType(4 << 26));
+        assertEquals(InstType.LW, Instruction.getInstType(5 << 26));
+        assertEquals(InstType.BREAK, Instruction.getInstType(6 << 26));
+        assertEquals(InstType.ADD, Instruction.getInstType(1 << 29));
+        assertEquals(InstType.SUB, Instruction.getInstType(1 << 29 | 1 << 26));
+        assertEquals(InstType.AND, Instruction.getInstType(1 << 29 | 2 << 26));
+        assertEquals(InstType.OR, Instruction.getInstType(1 << 29 | 3 << 26));
+        assertEquals(InstType.SRL, Instruction.getInstType(1 << 29 | 4 << 26));
+        assertEquals(InstType.SRA, Instruction.getInstType(1 << 29 | 5 << 26));
+        assertEquals(InstType.ADDI, Instruction.getInstType(2 << 29));
+        assertEquals(InstType.ANDI, Instruction.getInstType(2 << 29 | 1 << 26));
+        assertEquals(InstType.ORI, Instruction.getInstType(2 << 29 | 2 << 26));
+        assertEquals(InstType.MULT, Instruction.getInstType(3 << 29));
+        assertEquals(InstType.DIV, Instruction.getInstType(3 << 29 | 1 << 26));
+        assertEquals(InstType.MFHI, Instruction.getInstType(4 << 29));
+        assertEquals(InstType.MFLO, Instruction.getInstType(4 << 29 | 1 << 26));
     }
 
     public void testInstCat2() {
+        assertEquals("00100000001000000000000000000000\t256\tADD R1, R0, R0",
+            Instruction.decode(256, "00100000001000000000000000000000").toString()
+        );
+    }
 
+    public void testInstCat3() {
+        assertEquals("01000000101001010000000000001100\t292\tADDI R5, R5, #12",
+            Instruction.decode(292, "01000000101001010000000000001100").toString()
+        );
+        assertEquals("01000000101001011000000000000000\t292\tADDI R5, R5, #-32768",
+            Instruction.decode(292, "01000000101001011000000000000000").toString()
+        );
+    }
+
+    public void testInstCat4() {
+        assertEquals("01100000011001000000000000000000\t280\tMULT R3, R4",
+            Instruction.decode(280, "01100000011001000000000000000000").toString()
+        );
+    }
+
+    public void testInstCat5() {
+        assertEquals("10000100101000000000000000000000\t284\tMFLO R5",
+            Instruction.decode(284, "10000100101000000000000000000000").toString()
+        );
+    }
+
+    public void testArraysCopyRange() {
+        int[] vals = new int[] {1, 2, 3};
+        int[] newVals = Arrays.copyOfRange(vals, 1, 2);
+        assertEquals(1, newVals.length);
+        assertEquals(2, newVals[0]);
     }
 }
