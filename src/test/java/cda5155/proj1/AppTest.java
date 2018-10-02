@@ -176,4 +176,50 @@ public class AppTest
         assertEquals(1, newVals.length);
         assertEquals(2, newVals[0]);
     }
+
+    public void testInstJ() {
+        assertEquals("00000000000000000000000001000011\t308\tJ #268",
+            Instruction.decode(308, "00000000000000000000000001000011").toString()
+        );
+    }
+
+    public void testInstBranchCmpr() {
+        InstBranchCmpr inst;
+        inst = (InstBranchCmpr)Instruction.decode(268, "00000100001000100000000000001010");
+        assertEquals(312, inst.target());
+        assertEquals("00000100001000100000000000001010\t268\tBEQ R1, R2, #40",
+            inst.toString()
+        );
+        inst = (InstBranchCmpr)Instruction.decode(268, "00000100011000101111111111111111");
+        assertEquals(268, inst.target());
+        assertEquals("00000100011000101111111111111111\t268\tBEQ R3, R2, #-4",
+            inst.toString()
+        );
+        inst = (InstBranchCmpr)Instruction.decode(260, "00001000101000100000000000001011");
+        assertEquals(308, inst.target());
+        assertEquals("00001000101000100000000000001011\t260\tBNE R5, R2, #44",
+            inst.toString()
+        );
+    }
+
+    public void testInstLoadStore() {
+        assertEquals("00010000110001010000000101011100\t296\tSW R5, 348(R6)",
+            Instruction.decode(296, "00010000110001010000000101011100").toString()
+        );
+        assertEquals("00010100110000110000000100111100\t272\tLW R3, 316(R6)",
+            Instruction.decode(272, "00010100110000110000000100111100").toString()
+        );
+    }
+
+    public void testInstBGTZ() {
+        assertEquals("00001100101000000000000000000001\t288\tBGTZ R5, #4",
+            Instruction.decode(288, "00001100101000000000000000000001").toString()
+        );
+    }
+
+    public void testInstBREAK() {
+        assertEquals("00011000000000000000000000000000\t312\tBREAK",
+            Instruction.decode(312, "00011000000000000000000000000000").toString()
+        );
+    }
 }

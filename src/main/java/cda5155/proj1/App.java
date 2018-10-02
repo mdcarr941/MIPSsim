@@ -43,6 +43,8 @@ abstract class Instruction {
         return (word & 0x1C000000) >>> 26;
     }
 
+    protected static final String unknownInstMsg = "Unknown Instruction.";
+
     public static Instruction decode(int address, int word) throws IllegalArgumentException {
         switch (getFirst3Bits(word)) {
             case 0:
@@ -56,7 +58,7 @@ abstract class Instruction {
             case 4:
                 return new InstCat5(address, word);
             default:
-                throw new IllegalArgumentException("Argument must be between 0 and 4 inclusive.");
+                throw new IllegalArgumentException(unknownInstMsg);
         }
     }
 
@@ -78,7 +80,7 @@ abstract class Instruction {
             case 4:
                 return InstCat5.getInstType(word);
             default:
-                throw new IllegalArgumentException("Argument must be between 0 and 4 inclusive.");
+                throw new IllegalArgumentException(unknownInstMsg);
         }
     }
 
@@ -94,6 +96,10 @@ abstract class Instruction {
         return (word & 0x0000F800) >> 11;
     }
 
+    public static short getSignedLower16(int word) {
+        return (short)(word & 0x0000FFFF);
+    }
+
     public abstract String disassemble();
 
     public String toString() {
@@ -104,7 +110,27 @@ abstract class Instruction {
 abstract class InstCat1 extends Instruction {
     public InstCat1(int address, int word) {
         super(address, word);
-        _type = getInstType(word);
+    }
+
+    public static InstCat1 decode(int address, int word) throws IllegalArgumentException {
+        switch(getSecond3Bits(word)) {
+            case 0:
+                return new InstJ(address, word);
+            case 1:
+                return new InstBranchCmpr(address, word);
+            case 2:
+                return new InstBranchCmpr(address, word);
+            case 3:
+                return new InstBGTZ(address, word);
+            case 4:
+                return new InstLoadStore(address, word);
+            case 5:
+                return new InstLoadStore(address, word);
+            case 6:
+                return new InstBREAK(address, word);
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -124,22 +150,173 @@ abstract class InstCat1 extends Instruction {
             case 6:
                 return InstType.BREAK;
             default:
-                throw new IllegalArgumentException("Value of argument must be between 0 and 6 inclusive.");
+                throw new IllegalArgumentException(unknownInstMsg);
         }
-    }
-
-    public String toString() {
-        throw new UnsupportedOperationException("InstCat1 cannot be converted to a string.");
     }
 }
 
 class InstJ extends InstCat1 {
+    protected int _target;
+    int target() {
+        return _target;
+    }
+
     public InstJ(int address, int word) {
         super(address, word);
+        _type = InstType.J;
+        _target = (address + 4) & 0xC0000000 | (word & 0x03FFFFFF) << 2;
     }
 
     public String disassemble() {
-        return "J";
+        return String.format("J #%d", _target);
+    }
+}
+
+class InstBranchCmpr extends InstCat1 {
+    protected int _rs;
+    int rs() {
+        return _rs;
+    }
+
+    protected int _rt;
+    int rt() {
+        return _rt;
+    }
+
+    protected int _offset;
+    int offset() {
+        return _offset;
+    }
+
+    protected int _target;
+    int target() {
+        return _target;
+    }
+
+    public InstBranchCmpr(int address, int word) {
+        super(address, word);
+        _type = getInstType(word);
+        _rs = Instruction.getFirstArg(word);
+        _rt = Instruction.getSecondArg(word);
+        _offset = Instruction.getSignedLower16(word) << 2;
+        _target = address + 4 + _offset;
+    }
+
+    public static InstType getInstType(int word) throws IllegalArgumentException {
+        switch (getSecond3Bits(word)) {
+            case 1:
+                return InstType.BEQ;
+            case 2:
+                return InstType.BNE;
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
+    }
+
+    public String disassemble() {
+        String instString;
+        switch (_type) {
+            case BEQ:
+                instString = "BEQ";
+                break;
+            case BNE:
+                instString = "BNE";
+                break;
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
+        return String.format("%s R%d, R%d, #%d", instString, _rs, _rt, _offset);
+    }
+}
+
+class InstBGTZ extends InstCat1 {
+    protected int _rs;
+    int rs() {
+        return _rs;
+    }
+
+    protected int _offset;
+    int offset() {
+        return _offset;
+    }
+
+    protected int _target;
+    int target() {
+        return _target;
+    }
+
+    public InstBGTZ(int address, int word) {
+        super(address, word);
+        _type = InstType.BGTZ;
+        _rs = getFirstArg(word);
+        _offset = getSignedLower16(word) << 2;
+        _target = _address + 4 + _offset;
+    }
+
+    public String disassemble() {
+        return String.format("BGTZ R%d, #%d", _rs, _offset);
+    }
+}
+
+class InstLoadStore extends InstCat1 {
+    protected int _base;
+    int base() {
+        return _base;
+    }
+
+    protected int _rt;
+    int rt() {
+        return _rt;
+    }
+
+    protected short _offset;
+    short offset() {
+        return _offset;
+    }
+
+    public InstLoadStore(int address, int word) {
+        super(address, word);
+        _type = getInstType(word);
+        _base = getFirstArg(word);
+        _rt = getSecondArg(word);
+        _offset = getSignedLower16(word);
+    }
+
+    public static InstType getInstType(int word) throws IllegalArgumentException {
+        switch (getSecond3Bits(word)) {
+            case 4:
+                return InstType.SW;
+            case 5:
+                return InstType.LW;
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
+    }
+
+    public String disassemble() {
+        String instString;
+        switch (_type) {
+            case SW:
+                instString = "SW";
+                break;
+            case LW:
+                instString = "LW";
+                break;
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
+        return String.format("%s R%d, %d(R%d)", instString, _rt, _offset, _base);
+    }
+}
+
+class InstBREAK extends InstCat1 {
+    public InstBREAK(int address, int word) {
+        super(address, word);
+        _type = InstType.BREAK;
+    }
+
+    public String disassemble() {
+        return "BREAK";
     }
 }
 
@@ -182,7 +359,7 @@ class InstCat2 extends Instruction {
             case 5:
                 return InstType.SRA;
             default:
-                throw new IllegalArgumentException("Value of argument must be between 0 and 5 inclusive.");
+                throw new IllegalArgumentException(unknownInstMsg);
         }
     }
 
@@ -235,11 +412,7 @@ class InstCat3 extends Instruction {
         _type = getInstType(word);
         _dest = getFirstArg(word);
         _src = getSecondArg(word);
-        _imm = getImmediateVal(word);
-    }
-
-    public static short getImmediateVal(int word) {
-        return (short)(word & 0x0000FFFF);
+        _imm = getSignedLower16(word);
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -251,7 +424,7 @@ class InstCat3 extends Instruction {
             case 2:
                 return InstType.ORI;
             default:
-                throw new IllegalArgumentException("Value of argument must be between 0 and 2 inclusive.");
+                throw new IllegalArgumentException(unknownInstMsg);
         }
     }
 
@@ -299,7 +472,7 @@ class InstCat4 extends Instruction {
             case 1:
                 return InstType.DIV;
             default:
-                throw new IllegalArgumentException("Value of argument must be either 0 or 1.");
+                throw new IllegalArgumentException(unknownInstMsg);
         }
     }
 
@@ -338,7 +511,7 @@ class InstCat5 extends Instruction {
             case 1:
                 return InstType.MFLO;
             default:
-                throw new IllegalArgumentException("Value of argument must be either 0 or 1.");
+                throw new IllegalArgumentException(unknownInstMsg);
         }
     }
 
