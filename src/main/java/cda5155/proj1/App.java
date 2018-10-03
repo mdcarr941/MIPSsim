@@ -55,13 +55,13 @@ abstract class Instruction {
             case 0:
                 return InstCat1.decode(address, word);
             case 1:
-                return new InstCat2(address, word);
+                return InstCat2.decode(address, word);
             case 2:
-                return new InstCat3(address, word);
+                return InstCat3.decode(address, word);
             case 3:
-                return new InstCat4(address, word);
+                return InstCat4.decode(address, word);
             case 4:
-                return new InstCat5(address, word);
+                return InstCat5.decode(address, word);
             default:
                 throw new IllegalArgumentException(unknownInstMsg);
         }
@@ -103,6 +103,10 @@ abstract class Instruction {
 
     public static short getSignedLower16(int word) {
         return (short)(word & 0x0000FFFF);
+    }
+
+    public static int getUnsignedLower16(int word) {
+        return word & 0x0000FFFF;
     }
 
     public abstract String disassemble();
@@ -325,7 +329,7 @@ class InstBREAK extends InstCat1 {
     }
 }
 
-class InstCat2 extends Instruction {
+abstract class InstCat2 extends Instruction {
     protected int _dest;
     int dest() {
         return _dest;
@@ -349,6 +353,25 @@ class InstCat2 extends Instruction {
         _src2 = getThirdArg(word);
     }
 
+    public static InstCat2 decode(int address, int word) {
+        switch (getSecond3Bits(word)) {
+            case 0:
+                return new InstArithType(address, word);
+            case 1:
+                return new InstArithType(address, word);
+            case 2:
+                return new InstArithType(address, word);
+            case 3:
+                return new InstArithType(address, word);
+            case 4:
+                return new InstBitShift(address, word);
+            case 5:
+                return new InstBitShift(address, word);
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
+    }
+
     public static InstType getInstType(int word) throws IllegalArgumentException {
         switch (getSecond3Bits(word)) {
             case 0:
@@ -367,6 +390,12 @@ class InstCat2 extends Instruction {
                 throw new IllegalArgumentException(unknownInstMsg);
         }
     }
+}
+
+class InstArithType extends InstCat2 {
+    public InstArithType(int address, int word) {
+        super(address, word);
+    }
 
     public String disassemble() {
         String typeString;
@@ -383,6 +412,21 @@ class InstCat2 extends Instruction {
             case OR:
                 typeString = "OR";
                 break;
+            default:
+                throw new UnknownError("Invalid instruction type InstArithType: " + _type);
+        }
+        return String.format("%s R%d, R%d, R%d", typeString, _dest, _src1, _src2);
+    }
+}
+
+class InstBitShift extends InstCat2 {
+    public InstBitShift(int address, int word) {
+        super(address, word);
+    }
+
+    public String disassemble() {
+        String typeString;
+        switch (_type) {
             case SRL:
                 typeString = "SRL";
                 break;
@@ -390,13 +434,13 @@ class InstCat2 extends Instruction {
                 typeString = "SRA";
                 break;
             default:
-                throw new UnknownError("Invalid instruction type for category 2: " + _type);
+                throw new UnknownError("Invalid instruction type for InstBitShift: " + _type);
         }
-        return String.format("%s R%d, R%d, R%d", typeString, _dest, _src1, _src2);
+        return String.format("%s R%d, R%d, #%d", typeString, _dest, _src1, _src2);
     }
 }
 
-class InstCat3 extends Instruction {
+abstract class InstCat3 extends Instruction {
     protected int _dest;
     int dest() {
         return _dest;
@@ -407,17 +451,23 @@ class InstCat3 extends Instruction {
         return _src;
     }
 
-    protected short _imm;
-    short imm() {
-        return _imm;
-    }
-
     public InstCat3(int address, int word) {
         super(address, word);
-        _type = getInstType(word);
         _dest = getFirstArg(word);
         _src = getSecondArg(word);
-        _imm = getSignedLower16(word);
+    }
+
+    public static InstCat3 decode(int address, int word) {
+        switch (getSecond3Bits(word)) {
+            case 0:
+                return new InstADDI(address, word);
+            case 1:
+                return new InstLogicalImm(address, word);
+            case 2:
+                return new InstLogicalImm(address, word);
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -432,13 +482,40 @@ class InstCat3 extends Instruction {
                 throw new IllegalArgumentException(unknownInstMsg);
         }
     }
+}
+
+class InstADDI extends InstCat3 {
+    protected short _imm;
+    short imm() {
+        return _imm;
+    }
+
+    public InstADDI(int address, int word) {
+        super(address, word);
+        _type = InstType.ADDI;
+        _imm = getSignedLower16(word);
+    }
+
+    public String disassemble() {
+        return  String.format("ADDI R%d, R%d, #%d", _dest, _src, _imm);
+    }
+}
+
+class InstLogicalImm extends InstCat3 {
+    protected int _imm;
+    int imm() {
+        return _imm;
+    }
+
+    public InstLogicalImm(int address, int word) {
+        super(address, word);
+        _type = getInstType(word);
+        _imm = getUnsignedLower16(word);
+    }
 
     public String disassemble() {
         String typeString;
         switch (_type) {
-            case ADDI:
-                typeString = "ADDI";
-                break;
             case ANDI:
                 typeString = "ANDI";
                 break;
@@ -446,7 +523,7 @@ class InstCat3 extends Instruction {
                 typeString = "ORI";
                 break;
             default:
-                throw new UnknownError("Invalid instruction type for category 3: " + _type);
+                throw new UnknownError("Invalid instruction type for InstLogicalImm: " + _type);
         }
         return String.format("%s R%d, R%d, #%d", typeString, _dest, _src, _imm);
     }
@@ -468,6 +545,10 @@ class InstCat4 extends Instruction {
         _type = getInstType(word);
         _src1 = getFirstArg(word);
         _src2 = getSecondArg(word);
+    }
+
+    public static InstCat4 decode(int address, int word) {
+        return new InstCat4(address, word);
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -507,6 +588,10 @@ class InstCat5 extends Instruction {
         super(address, word);
         _type = getInstType(word);
         _dest = getFirstArg(word);
+    }
+
+    public static InstCat5 decode(int address, int word) {
+        return new InstCat5(address, word);
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -599,7 +684,7 @@ class Memory {
     }
 
     public String toString() {
-        String newLine = App.getLineSep();
+        String newLine = App.LINE_SEP;
         StringBuffer buff = new StringBuffer(33 * _words.length);
         for (int k = 0; k < _words.length; ++k) {
             buff.append(word2string(_words[k]) + newLine);
@@ -633,7 +718,7 @@ class Memory {
     }
 
     public String disassemble() {
-        String newLine = App.getLineSep();
+        String newLine = App.LINE_SEP;
         StringBuilder builder = new StringBuilder(64 * _words.length);
         int addr;
         for (addr = _minAddr; addr < _dataStartAddr; addr += 4) {
@@ -646,7 +731,7 @@ class Memory {
                 word2string(_words[index]), addr, _words[index]
             ));
         }
-        return builder.toString();
+        return builder.toString().trim();
     }
 }
 
@@ -695,39 +780,39 @@ class Processor {
         gprs[inst.rt()] = memory.fetch(gprs[inst.base()] + inst.offset());
     }
 
-    protected void executeADD(InstCat2 inst) {
+    protected void executeADD(InstArithType inst) {
         gprs[inst.dest()] = gprs[inst.src1()] + gprs[inst.src2()];
     }
 
-    protected void executeSUB(InstCat2 inst) {
+    protected void executeSUB(InstArithType inst) {
         gprs[inst.dest()] = gprs[inst.src1()] - gprs[inst.src2()];
     }
 
-    protected void executeAND(InstCat2 inst) {
+    protected void executeAND(InstArithType inst) {
         gprs[inst.dest()] = gprs[inst.src1()] & gprs[inst.src2()];
     }
 
-    protected void executeOR(InstCat2 inst) {
+    protected void executeOR(InstArithType inst) {
         gprs[inst.dest()] = gprs[inst.src1()] | gprs[inst.src2()];
     }
 
-    protected void executeSRL(InstCat2 inst) {
-        gprs[inst.dest()] = gprs[inst.src1()] >>> gprs[inst.src2()];
+    protected void executeSRL(InstBitShift inst) {
+        gprs[inst.dest()] = gprs[inst.src1()] >>> inst.src2();
     }
 
-    protected void executeSRA(InstCat2 inst) {
-        gprs[inst.dest()] = gprs[inst.src1()] >> gprs[inst.src2()];
+    protected void executeSRA(InstBitShift inst) {
+        gprs[inst.dest()] = gprs[inst.src1()] >> inst.src2();
     }
 
-    protected void executeADDI(InstCat3 inst) {
+    protected void executeADDI(InstADDI inst) {
         gprs[inst.dest()] = gprs[inst.src()] + inst.imm();
     }
 
-    protected void executeANDI(InstCat3 inst) {
+    protected void executeANDI(InstLogicalImm inst) {
         gprs[inst.dest()] = gprs[inst.src()] & inst.imm();
     }
 
-    protected void executeORI(InstCat3 inst) {
+    protected void executeORI(InstLogicalImm inst) {
         gprs[inst.dest()] = gprs[inst.src()] | inst.imm();
     }
 
@@ -773,31 +858,31 @@ class Processor {
             case BREAK:
                 return;
             case ADD:
-                executeADD((InstCat2)inst);
+                executeADD((InstArithType)inst);
                 return;
             case SUB:
-                executeSUB((InstCat2)inst);
+                executeSUB((InstArithType)inst);
                 return;
             case AND:
-                executeAND((InstCat2)inst);
+                executeAND((InstArithType)inst);
                 return;
             case OR:
-                executeOR((InstCat2)inst);
+                executeOR((InstArithType)inst);
                 return;
             case SRL:
-                executeSRL((InstCat2)inst);
+                executeSRL((InstBitShift)inst);
                 return;
             case SRA:
-                executeSRA((InstCat2)inst);
+                executeSRA((InstBitShift)inst);
                 return;
             case ADDI:
-                executeADDI((InstCat3)inst);
+                executeADDI((InstADDI)inst);
                 return;
             case ANDI:
-                executeANDI((InstCat3)inst);
+                executeANDI((InstLogicalImm)inst);
                 return;
             case ORI:
-                executeORI((InstCat3)inst);
+                executeORI((InstLogicalImm)inst);
                 return;
             case MULT:
                 executeMULT((InstCat4)inst);
@@ -826,7 +911,7 @@ class Processor {
             builder.append(cycleSnapshot(cycle, inst));
             if (inst.type() == InstType.BREAK) break;
         }
-        return builder.toString();
+        return builder.toString().trim();
     }
 
     public String getGprState(int index) {
@@ -846,7 +931,7 @@ class Processor {
     }
 
     public String cycleSnapshot(int cycle, Instruction inst) {
-        String newLine = App.getLineSep();
+        String newLine = App.LINE_SEP;
         StringBuilder builder = new StringBuilder(220);
         builder.append("--------------------" + newLine);
         builder.append(String.format("Cycle %d:\t%d\t%s%n", cycle, inst.address(), inst.disassemble()));
@@ -864,13 +949,29 @@ class Processor {
 }
 
 public class App {
-    public static String getLineSep() {
-        return System.getProperty("line.separator");
+    public static final String DEFAULT_INPUT = "sample.txt";
+    public static final String DISASSEMBLY_NAME = "disassembly.txt";
+    public static final String SIMULATION_NAME = "simulation.txt";
+    public static final Charset CHARSET = StandardCharsets.UTF_8;
+    public static final String LINE_SEP = System.getProperty("line.separator");
+
+    public static void write2file(String contents, String fileName) throws IOException {
+        PrintWriter writer = new PrintWriter(
+            Files.newBufferedWriter(Paths.get(fileName), CHARSET,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+            )
+        );
+        writer.write(contents);
+        writer.close();
     }
 
-    public static final String defaultInput = "sample.txt";
-    public static final String disassemblyName = "disassembly.txt";
-    public static final String simulationName = "simulation.txt";
+    public static void writeDisassembly(String disassembly) throws IOException {
+        write2file(disassembly, DISASSEMBLY_NAME);
+    }
+
+    public static void writeSimulation(String simulation) throws IOException {
+        write2file(simulation, SIMULATION_NAME);
+    }
 
     public static void main(String[] args) throws IOException {
         String inputPath;
@@ -878,19 +979,12 @@ public class App {
             inputPath = args[1];
         }
         else {
-            inputPath = defaultInput;
+            inputPath = DEFAULT_INPUT;
         }
+
         Memory memory = new Memory(inputPath);
-        OpenOption options = StandardOpenOption.TRUNCATE_EXISTING;
-        Charset cs = StandardCharsets.UTF_8;
-
-        PrintWriter disassembly = new PrintWriter(Files.newBufferedWriter(Paths.get(disassemblyName), cs, options));
-        disassembly.write(memory.disassemble());
-        disassembly.close();
-
-        PrintWriter simulation = new PrintWriter(Files.newBufferedWriter(Paths.get(simulationName), cs, options));
-        Processor proc = new Processor(inputPath);
-        simulation.write(proc.simulate());
-        simulation.close();
+        writeDisassembly(memory.disassemble());
+        Processor proc = new Processor(memory);
+        writeSimulation(proc.simulate());
     }
 }

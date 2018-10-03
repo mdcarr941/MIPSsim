@@ -231,6 +231,10 @@ public class AppTest
         );
     }
 
+    public String changeLineSep(String input) {
+        return input.replaceAll("\r\n", App.LINE_SEP);
+    }
+
     public String getFileContents(String pathString) throws IOException {
         List<String> lines = Files.readAllLines(Paths.get(pathString));
         StringBuilder builder = new StringBuilder();
@@ -238,23 +242,38 @@ public class AppTest
         for (int k = 0; k < end; ++k) {
             builder.append(lines.get(k) + '\n');
         }
-        return builder.toString();
+        return changeLineSep(builder.toString()).trim();
     }
 
     public void testMemoryDisassemble() throws IOException {
         String expectedDisassembly = getFileContents("sample_disassembly.txt");
         Memory memory = new Memory("sample.txt");
-        assertEquals(expectedDisassembly, memory.disassemble());
-    }
-
-    public String changeLineSep(String input) {
-        return input.replaceAll("\r\n", App.getLineSep());
+        String disassembly = memory.disassemble();
+        App.writeDisassembly(disassembly);
+        assertEquals(expectedDisassembly, disassembly);
     }
 
     public void testProcessorSimulate() throws IOException {
-        String expectedSimulation = changeLineSep(getFileContents("sample_simulation.txt")).trim();
+        String expected = getFileContents("sample_simulation.txt");
         Processor proc = new Processor("sample.txt");
-        String simulation = proc.simulate().trim();
-        assertEquals(expectedSimulation, simulation);
+        String simulation = proc.simulate();
+        App.writeSimulation(simulation);
+        assertEquals(expected, simulation);
+    }
+
+    public void testOtherSampleDisassembly() throws IOException {
+        String expected = getFileContents("other_disassembly.txt");
+        Memory memory = new Memory("other_sample.txt");
+        String disassembly = memory.disassemble();
+        App.write2file(disassembly, "other_disassembly_mine.txt");
+        assertEquals(expected, disassembly);
+    }
+
+    public void testOtherSampleSimulation() throws IOException {
+        String expected = getFileContents("other_simulation.txt");
+        Processor proc = new Processor("other_sample.txt");
+        String simulation = proc.simulate();
+        App.write2file(simulation, "other_simulation_mine.txt");
+        assertEquals(expected, simulation);
     }
 }
