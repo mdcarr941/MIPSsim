@@ -5,3 +5,10 @@ project1.pdf
 target/
 simulation.txt
 build/
+other_disassembly.txt
+other_disassembly_mine.txt
+other_sample.txt
+other_simulation.txt
+other_simulation_mine.txt
+student_samples.txt
+disassembly.txt

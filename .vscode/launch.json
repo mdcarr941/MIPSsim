@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "CodeLens (Launch) - MIPSsim",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "stopOnEntry": false,
+            "mainClass": "cda5155.proj1.MIPSsim",
+            "args": "",
+            "projectName": "proj1"
+        }
+    ]
+}

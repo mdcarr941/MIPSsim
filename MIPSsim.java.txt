@@ -1,11 +1,18 @@
-package cda5155.proj1;
+/* On my honor, I have neither given nor received any
+ * unauthorized aid on this assignment */
+
+ /** 
+  * A simulator for a pseudo-MIPS ISA.
+  * @author Matthew Carr
+  */
+
+
 
 import java.util.List;
 import java.io.PrintWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.charset.Charset;
-import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -684,7 +691,7 @@ class Memory {
     }
 
     public String toString() {
-        String newLine = App.LINE_SEP;
+        String newLine = MIPSsim.LINE_SEP;
         StringBuffer buff = new StringBuffer(33 * _words.length);
         for (int k = 0; k < _words.length; ++k) {
             buff.append(word2string(_words[k]) + newLine);
@@ -718,7 +725,7 @@ class Memory {
     }
 
     public String disassemble() {
-        String newLine = App.LINE_SEP;
+        String newLine = MIPSsim.LINE_SEP;
         StringBuilder builder = new StringBuilder(64 * _words.length);
         int addr;
         for (addr = _minAddr; addr < _dataStartAddr; addr += 4) {
@@ -931,7 +938,7 @@ class Processor {
     }
 
     public String cycleSnapshot(int cycle, Instruction inst) {
-        String newLine = App.LINE_SEP;
+        String newLine = MIPSsim.LINE_SEP;
         StringBuilder builder = new StringBuilder(220);
         builder.append("--------------------" + newLine);
         builder.append(String.format("Cycle %d:\t%d\t%s%n", cycle, inst.address(), inst.disassemble()));
@@ -948,7 +955,7 @@ class Processor {
     }
 }
 
-public class App {
+public class MIPSsim {
     public static final String DEFAULT_INPUT = "sample.txt";
     public static final String DISASSEMBLY_NAME = "disassembly.txt";
     public static final String SIMULATION_NAME = "simulation.txt";
@@ -973,7 +980,7 @@ public class App {
         write2file(simulation, SIMULATION_NAME);
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
         String inputPath;
         if (args.length >= 2) {
             inputPath = args[1];
@@ -982,9 +989,27 @@ public class App {
             inputPath = DEFAULT_INPUT;
         }
 
-        Memory memory = new Memory(inputPath);
-        writeDisassembly(memory.disassemble());
-        Processor proc = new Processor(memory);
-        writeSimulation(proc.simulate());
+        try {
+            Memory memory = new Memory(inputPath);
+            try {
+                writeDisassembly(memory.disassemble());
+            }
+            catch (IOException e) {
+                System.err.println("Failed to write dissassembly to file: " + DISASSEMBLY_NAME);
+                System.err.println(e.getMessage());
+            }
+            Processor proc = new Processor(memory);
+            try {
+                writeSimulation(proc.simulate());
+            }
+            catch (IOException e) {
+                System.err.println("Failed to write simulation file: " + SIMULATION_NAME);
+                System.err.println(e.getMessage());
+            }
+        }
+        catch (IOException e) {
+            System.err.println("Unable to read input file: " + inputPath);
+            System.err.println(e.getMessage());
+        }
     }
 }
