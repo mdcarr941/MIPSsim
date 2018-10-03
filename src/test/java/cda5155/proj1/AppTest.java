@@ -4,6 +4,14 @@ import java.util.*;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+//import java.nio.file.Path;
+//import java.io.BufferedReader;
+//import java.io.PrintWriter;
+//import java.io.CharArrayWriter;
 
 /**
  * Unit test for simple App.
@@ -221,5 +229,42 @@ public class AppTest
         assertEquals("00011000000000000000000000000000\t312\tBREAK",
             Instruction.decode(312, "00011000000000000000000000000000").toString()
         );
+    }
+
+    public String getFileContents(String pathString) throws IOException {
+        List<String> lines = Files.readAllLines(Paths.get(pathString));
+        StringBuilder builder = new StringBuilder();
+        int end = lines.size();
+        for (int k = 0; k < end; ++k) {
+            builder.append(lines.get(k) + '\n');
+        }
+        return builder.toString();
+    }
+
+    public void testMemoryDisassemble() throws IOException {
+        String expectedDisassembly = getFileContents("sample_disassembly.txt");
+        Memory memory = new Memory("sample.txt");
+        assertEquals(expectedDisassembly, memory.disassemble());
+    }
+
+    public String removeCarridgeReturn(String input) {
+        int len = input.length();
+        StringBuilder builder = new StringBuilder(len);
+        char c;
+        for (int k = 0; k < len; ++k) {
+            c = input.charAt(k);
+            if (c != '\r') builder.append(c);
+        }
+        return builder.toString();
+    }
+
+    public void testProcessorSimulate() throws IOException {
+        String expectedSimulation = removeCarridgeReturn(getFileContents("sample_simulation.txt"));
+        Processor proc = new Processor("sample.txt");
+        BufferedWriter writer = Files.newBufferedWriter(Paths.get("simulation.txt"));
+        writer.write(proc.simulate());
+        writer.flush();
+        writer.close();
+        //assertEquals(expectedSimulation, proc.simulate());
     }
 }

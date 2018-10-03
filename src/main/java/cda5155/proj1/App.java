@@ -1,10 +1,15 @@
 package cda5155.proj1;
 
-import java.io.File;
 import java.util.List;
-import java.util.Arrays;
+import java.io.PrintWriter;
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
+import java.nio.file.OpenOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Paths;
 
 enum InstType {
     J, BEQ, BNE, BGTZ, SW, LW, BREAK,
@@ -532,26 +537,48 @@ class InstCat5 extends Instruction {
 }
 
 class Memory {
+    /* The actual contents of this memory object. */
     protected int[] _words;
 
-    protected static final int _min_addr = 256;
-
-    public int min_addr() {
-        return _min_addr;
+    protected static final int _minAddr = 256;
+    /** The minimum valid memory address. */
+    public int minAddr() {
+        return _minAddr;
     }
 
-    protected int _max_addr;
-
-    public int max_addr() {
-        return _max_addr;
+    protected int _maxAddr;
+    /** One plus the largest valid memory address. */
+    public int maxAddr() {
+        return _maxAddr;
     }
+
+    protected int _dataStartAddr;
+    /** The address at which program data starts. */
+    int dataStartAddr() {
+        return _dataStartAddr;
+    }
+
+    protected static final int breakWord = 0x18000000;
 
     public Memory(List<String> lines) {
         _words = new int[lines.size()];
-        _max_addr = 4 * _words.length + _min_addr;
+        _maxAddr = index2addr(_words.length);
         for (int k = 0; k < _words.length; ++k) {
             _words[k] = string2word(lines.get(k));
+            if (_words[k] == breakWord) _dataStartAddr = index2addr(k + 1);
         }
+    }
+
+    public Memory(String pathString) throws IOException, InvalidPathException {
+        this(Files.readAllLines(Paths.get(pathString)));
+    }
+
+    public static int index2addr(int index) {
+        return 4 * index + _minAddr;
+    }
+
+    public static int addr2index(int addr) {
+        return (addr - _minAddr) / 4;
     }
 
     public static int string2word(String intString) {
@@ -572,57 +599,298 @@ class Memory {
     }
 
     public String toString() {
+        String newLine = App.getLineSep();
         StringBuffer buff = new StringBuffer(33 * _words.length);
         for (int k = 0; k < _words.length; ++k) {
-            buff.append(word2string(_words[k]) + '\n');
+            buff.append(word2string(_words[k]) + newLine);
         }
         return buff.toString();        
     }
 
-    public static int getIndex(int addr) {
-        return (addr - _min_addr) / 4;
+    protected String badIndexMsg() {
+        return String.format("must have %d <= addr <= %d", _minAddr, _maxAddr);
     }
 
     public int fetch(int addr) throws IllegalArgumentException {
         try {
-            return _words[getIndex(addr)];
+            return _words[addr2index(addr)];
         }
         catch (IndexOutOfBoundsException e) {
-            throw new IllegalArgumentException(
-                String.format("must have %d <= addr <= %d", _min_addr, _max_addr)
-            );
+            throw new IllegalArgumentException(badIndexMsg());
         }
+    }
+
+    public void store(int addr, int word) throws IllegalArgumentException {
+        if (addr < _dataStartAddr) {
+            throw new IllegalArgumentException("Segmentation Fault: cannot store data in the code segment.");
+        }
+        try {
+            _words[addr2index(addr)] = word;
+        }
+        catch (IndexOutOfBoundsException e) {
+            throw new IllegalArgumentException(badIndexMsg());
+        }
+    }
+
+    public String disassemble() {
+        String newLine = App.getLineSep();
+        StringBuilder builder = new StringBuilder(64 * _words.length);
+        int addr;
+        for (addr = _minAddr; addr < _dataStartAddr; addr += 4) {
+            builder.append(Instruction.decode(addr, _words[addr2index(addr)]).toString() + newLine);
+        }
+        int index;
+        for (; addr < _maxAddr; addr += 4) {
+            index = addr2index(addr);
+            builder.append(String.format("%s\t%d\t%d%n",
+                word2string(_words[index]), addr, _words[index]
+            ));
+        }
+        return builder.toString();
     }
 }
 
 class Processor {
-    public static Instruction fetch(Memory memory, int pc) {
-        return Instruction.decode(pc, memory.fetch(pc));
+    Memory memory;
+    int pc;
+    int[] gprs;
+    int hi;
+    int lo;
+
+    public Processor(Memory memory) {
+        this.memory = memory;
+        pc = 256;
+        gprs = new int[32];
     }
 
-    public static long decodeLong(byte[] memory, int addr) {
-        return (long)(memory[addr] << 24 | memory[addr+1] << 16 | memory[addr+2] << 8 | memory[addr+3]);
+    public Processor(String pathString) throws IOException {
+        this(new Memory(pathString));
     }
 
-    public static void run(Memory memory, File dissembly, File simulation) {
+    protected Instruction fetchAndDecode(int addr) {
+        return Instruction.decode(addr, memory.fetch(addr));
+    }
+
+    protected void executeJ(InstJ inst) {
+        pc = inst.target() - 4;
+    }
+
+    protected void executeBEQ(InstBranchCmpr inst) {
+        if (gprs[inst.rs()] == gprs[inst.rt()]) pc = inst.target() - 4;
+    }
+
+    protected void executeBNE(InstBranchCmpr inst) {
+        if (gprs[inst.rs()] != gprs[inst.rt()]) pc = inst.target() - 4;
+    }
+
+    protected void executeBGTZ(InstBGTZ inst) {
+        if (gprs[inst.rs()] > 0) pc = inst.target() - 4;
+    }
+
+    protected void executeSW(InstLoadStore inst) {
+        memory.store(gprs[inst.base()] + inst.offset(), gprs[inst.rt()]);
+    }
+
+    protected void executeLW(InstLoadStore inst) {
+        gprs[inst.rt()] = memory.fetch(gprs[inst.base()] + inst.offset());
+    }
+
+    protected void executeADD(InstCat2 inst) {
+        gprs[inst.dest()] = gprs[inst.src1()] + gprs[inst.src2()];
+    }
+
+    protected void executeSUB(InstCat2 inst) {
+        gprs[inst.dest()] = gprs[inst.src1()] - gprs[inst.src2()];
+    }
+
+    protected void executeAND(InstCat2 inst) {
+        gprs[inst.dest()] = gprs[inst.src1()] & gprs[inst.src2()];
+    }
+
+    protected void executeOR(InstCat2 inst) {
+        gprs[inst.dest()] = gprs[inst.src1()] | gprs[inst.src2()];
+    }
+
+    protected void executeSRL(InstCat2 inst) {
+        gprs[inst.dest()] = gprs[inst.src1()] >>> gprs[inst.src2()];
+    }
+
+    protected void executeSRA(InstCat2 inst) {
+        gprs[inst.dest()] = gprs[inst.src1()] >> gprs[inst.src2()];
+    }
+
+    protected void executeADDI(InstCat3 inst) {
+        gprs[inst.dest()] = gprs[inst.src()] + inst.imm();
+    }
+
+    protected void executeANDI(InstCat3 inst) {
+        gprs[inst.dest()] = gprs[inst.src()] & inst.imm();
+    }
+
+    protected void executeORI(InstCat3 inst) {
+        gprs[inst.dest()] = gprs[inst.src()] | inst.imm();
+    }
+
+    protected void executeMULT(InstCat4 inst) {
+        long result = gprs[inst.src1()] * gprs[inst.src2()];
+        lo = (int) (result & 0x00000000FFFFFFFFL);
+        hi = (int)((result & 0xFFFFFFFF00000000L) >>> 32);
+    }
+
+    protected void executeDIV(InstCat4 inst) {
+        lo = gprs[inst.src1()] / gprs[inst.src2()];
+        hi = gprs[inst.src1()] % gprs[inst.src2()];
+    }
+
+    protected void executeMFHI(InstCat5 inst) {
+        gprs[inst.dest()] = hi;
+    }
+
+    protected void executeMFLO(InstCat5 inst) {
+        gprs[inst.dest()] = lo;
+    }
+
+    protected void execute(Instruction inst) {
+        switch (inst.type()) {
+            case J:
+                executeJ((InstJ)inst);
+                return;
+            case BEQ:
+                executeBEQ((InstBranchCmpr)inst);
+                return;
+            case BNE:
+                executeBNE((InstBranchCmpr)inst);
+                return;
+            case BGTZ:
+                executeBGTZ((InstBGTZ)inst);
+                return;
+            case SW:
+                executeSW((InstLoadStore)inst);
+                return;
+            case LW:
+                executeLW((InstLoadStore)inst);
+                return;
+            case BREAK:
+                return;
+            case ADD:
+                executeADD((InstCat2)inst);
+                return;
+            case SUB:
+                executeSUB((InstCat2)inst);
+                return;
+            case AND:
+                executeAND((InstCat2)inst);
+                return;
+            case OR:
+                executeOR((InstCat2)inst);
+                return;
+            case SRL:
+                executeSRL((InstCat2)inst);
+                return;
+            case SRA:
+                executeSRA((InstCat2)inst);
+                return;
+            case ADDI:
+                executeADDI((InstCat3)inst);
+                return;
+            case ANDI:
+                executeANDI((InstCat3)inst);
+                return;
+            case ORI:
+                executeORI((InstCat3)inst);
+                return;
+            case MULT:
+                executeMULT((InstCat4)inst);
+                return;
+            case DIV:
+                executeDIV((InstCat4)inst);
+                return;
+            case MFHI:
+                executeMFHI((InstCat5)inst);
+                return;
+            case MFLO:
+                executeMFLO((InstCat5)inst);
+                return;
+            default:
+                throw new UnknownError();
+        }
+    }
+
+    public String simulate() {
+        StringBuilder builder = new StringBuilder(8096);
         Instruction inst;
-        int pc, max_addr = memory.max_addr();
-        for (pc = 256; pc < max_addr; pc += 4) {
-            inst = fetch(memory, pc);
+        int maxAddr = memory.maxAddr();
+        for (int cycle = 1; pc < maxAddr; pc += 4, cycle += 1) {
+            inst = fetchAndDecode(pc);
+            execute(inst);
+            builder.append(cycleSnapshot(cycle, inst));
             if (inst.type() == InstType.BREAK) break;
         }
+        return builder.toString();
+    }
+
+    public String getGprState(int index) {
+        String[] values = new String[8];
+        for (int k = 0; k < 8; ++k, ++index) {
+            values[k] = Integer.toString(gprs[index]);
+        }
+        return String.join("\t", values);
+    }
+
+    public String getDataState(int addr) {
+        String[] values = new String[8];
+        for (int k = 0; k < 8 && addr < memory.maxAddr(); ++k, addr += 4) {
+            values[k] = Integer.toString(memory.fetch(addr));
+        }
+        return String.join("\t", values);
+    }
+
+    public String cycleSnapshot(int cycle, Instruction inst) {
+        String newLine = App.getLineSep();
+        StringBuilder builder = new StringBuilder(220);
+        builder.append("--------------------" + newLine);
+        builder.append(String.format("Cycle %d:\t%d\t%s%n", cycle, inst.address(), inst.disassemble()));
+        builder.append(newLine + "Registers" + newLine);
+        for (int k = 0; k < 32; k += 8) {
+            builder.append(String.format("R%02d:\t%s%n", k, getGprState(k)));
+        }
+        builder.append(newLine + "Data" + newLine);
+        for (int k = memory.dataStartAddr(); k < memory.maxAddr(); k += 32) {
+            builder.append(String.format("%d:\t%s%n", k, getDataState(k)));
+        }
+        builder.append(newLine);
+        return builder.toString();
     }
 }
 
 public class App {
+    public static String getLineSep() {
+        return System.getProperty("line.separator");
+    }
+
+    public static final String defaultInput = "sample.txt";
+    public static final String disassemblyName = "disassembly.txt";
+    public static final String simulationName = "simulation.txt";
+
     public static void main(String[] args) throws IOException {
-        Path path;
+        String inputPath;
         if (args.length >= 2) {
-            path = Paths.get(args[1]);
+            inputPath = args[1];
         }
         else {
-            path = Paths.get("sample.txt");
+            inputPath = defaultInput;
         }
-        Memory memory = new Memory(Files.readAllLines(path));
+        Memory memory = new Memory(inputPath);
+        OpenOption options = StandardOpenOption.TRUNCATE_EXISTING;
+        Charset cs = StandardCharsets.UTF_8;
+
+        PrintWriter disassembly = new PrintWriter(Files.newBufferedWriter(Paths.get(disassemblyName), cs, options));
+        disassembly.write(memory.disassemble());
+        disassembly.close();
+
+        PrintWriter simulation = new PrintWriter(Files.newBufferedWriter(Paths.get(simulationName), cs, options));
+        Processor proc = new Processor(inputPath);
+        simulation.write(proc.simulate());
+        simulation.close();
     }
 }
