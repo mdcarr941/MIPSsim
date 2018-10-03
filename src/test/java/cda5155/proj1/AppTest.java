@@ -267,10 +267,10 @@ public class AppTest
     }
 
     public void testOtherSampleSimulation() throws IOException {
-        String expected = getFileContents("other_simulation.txt");
+        String expected = getFileContents("other_simulation_wsfixed.txt");
         Processor proc = new Processor("other_sample.txt");
         String simulation = proc.simulate();
         MIPSsim.write2file(simulation, "other_simulation_mine.txt");
-        //assertEquals(expected, simulation);
+        assertEquals(expected, simulation);
     }
 }
