@@ -982,8 +982,8 @@ public class MIPSsim {
 
     public static void main(String[] args) {
         String inputPath;
-        if (args.length >= 2) {
-            inputPath = args[1];
+        if (args.length >= 1) {
+            inputPath = args[0];
         }
         else {
             inputPath = DEFAULT_INPUT;
@@ -996,7 +996,6 @@ public class MIPSsim {
             }
             catch (IOException e) {
                 System.err.println("Failed to write dissassembly to file: " + DISASSEMBLY_NAME);
-                System.err.println(e.getMessage());
             }
             Processor proc = new Processor(memory);
             try {
@@ -1004,12 +1003,10 @@ public class MIPSsim {
             }
             catch (IOException e) {
                 System.err.println("Failed to write simulation file: " + SIMULATION_NAME);
-                System.err.println(e.getMessage());
             }
         }
         catch (IOException e) {
             System.err.println("Unable to read input file: " + inputPath);
-            System.err.println(e.getMessage());
         }
     }
 }
