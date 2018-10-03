@@ -247,24 +247,14 @@ public class AppTest
         assertEquals(expectedDisassembly, memory.disassemble());
     }
 
-    public String removeCarridgeReturn(String input) {
-        int len = input.length();
-        StringBuilder builder = new StringBuilder(len);
-        char c;
-        for (int k = 0; k < len; ++k) {
-            c = input.charAt(k);
-            if (c != '\r') builder.append(c);
-        }
-        return builder.toString();
+    public String changeLineSep(String input) {
+        return input.replaceAll("\r\n", App.getLineSep());
     }
 
     public void testProcessorSimulate() throws IOException {
-        String expectedSimulation = removeCarridgeReturn(getFileContents("sample_simulation.txt"));
+        String expectedSimulation = changeLineSep(getFileContents("sample_simulation.txt")).trim();
         Processor proc = new Processor("sample.txt");
-        BufferedWriter writer = Files.newBufferedWriter(Paths.get("simulation.txt"));
-        writer.write(proc.simulate());
-        writer.flush();
-        writer.close();
-        //assertEquals(expectedSimulation, proc.simulate());
+        String simulation = proc.simulate().trim();
+        assertEquals(expectedSimulation, simulation);
     }
 }
