@@ -1,4 +1,4 @@
-package cda5155.proj1;
+package cda5155.MIPSsim;
 
 import java.util.*;
 import junit.framework.Test;

@@ -6,7 +6,7 @@
   * Written by Matthew Carr on October 3, 2018.
   */
 
-package cda5155.proj1;
+package cda5155.MIPSsim;
 
 import java.util.List;
 import java.io.PrintWriter;
@@ -191,7 +191,7 @@ class InstJ extends InstCat1 {
         _target = (address + 4) & 0xC0000000 | (word & 0x03FFFFFF) << 2;
     }
 
-    // result contains the target address to jump to
+    // result contains the target address to jump to.
     public void execute() {
         result = _target;
     }
@@ -231,7 +231,7 @@ class InstBranchCmpr extends InstCat1 {
         _target = address + 4 + _offset;
     }
 
-    // result contains the target address to jump to
+    // result contains the target address to jump to.
     public void execute() {
         switch (_type) {
             case BEQ:
@@ -306,7 +306,7 @@ class InstBGTZ extends InstCat1 {
         _target = _address + 4 + _offset;
     }
 
-    // result contains the target address to jump to
+    // result contains the target address to jump to.
     public void execute() {
         if (arg1Val > 0) {
             result = _target;
@@ -456,7 +456,7 @@ abstract class InstCat2 extends Instruction {
 }
 
 class InstArithType extends InstCat2 {
-    String _errMsg;
+    protected String _errMsg;
 
     public InstArithType(int address, int word) {
         super(address, word);
@@ -506,7 +506,7 @@ class InstArithType extends InstCat2 {
 }
 
 class InstBitShift extends InstCat2 {
-    String _errMsg;
+    protected String _errMsg;
 
     public InstBitShift(int address, int word) {
         super(address, word);
@@ -610,6 +610,8 @@ class InstADDI extends InstCat3 {
 }
 
 class InstLogicalImm extends InstCat3 {
+    protected String _errMsg;
+
     protected int _imm;
     int imm() {
         return _imm;
@@ -619,6 +621,22 @@ class InstLogicalImm extends InstCat3 {
         super(address, word);
         _type = getInstType(word);
         _imm = getUnsignedLower16(word);
+        _errMsg = "Invalid instruction type for InstLogicalImm: " + _type;
+    }
+
+    // result contains the result of the logical operator between
+    // arg1Val and the immediate value.
+    public void execute() {
+        switch (_type) {
+            case ANDI:
+                result = arg1Val & _imm;
+                break;
+            case ORI:
+                result = arg1Val | _imm;
+                break;
+            default:
+
+        }
     }
 
     public String disassemble() {
@@ -631,13 +649,15 @@ class InstLogicalImm extends InstCat3 {
                 typeString = "ORI";
                 break;
             default:
-                throw new UnknownError("Invalid instruction type for InstLogicalImm: " + _type);
+                throw new UnknownError(_errMsg);
         }
         return String.format("%s R%d, R%d, #%d", typeString, _dest, _src, _imm);
     }
 }
 
 class InstCat4 extends Instruction {
+    protected String _errMsg;
+
     protected int _src1;
     int src1() {
         return _src1;
@@ -648,11 +668,40 @@ class InstCat4 extends Instruction {
         return _src2;
     }
 
+    protected int _hi;
+    int hi() {
+        return _hi;
+    }
+
+    protected int _lo;
+    int lo() {
+        return _lo;
+    }
+
     public InstCat4(int address, int word) {
         super(address, word);
         _type = getInstType(word);
         _src1 = getFirstArg(word);
         _src2 = getSecondArg(word);
+        _errMsg = "Invalid instruction type for category 4: " + _type;
+    }
+
+    // result, hi, and lo are set by this method.
+    public void execute() {
+        switch (_type) {
+            case MULT:
+                result = arg1Val * arg2Val;
+                _lo = (int) (result & 0x00000000FFFFFFFFL);
+                _hi = (int)((result & 0xFFFFFFFF00000000L) >>> 32);
+                break;
+            case DIV:
+                result = arg1Val / arg2Val;
+                _lo = (int)result;
+                _hi = arg1Val % arg2Val;
+                break;
+            default:
+                throw new UnknownError(_errMsg);
+        }
     }
 
     public static InstCat4 decode(int address, int word) {
@@ -680,7 +729,7 @@ class InstCat4 extends Instruction {
                 typeString = "DIV";
                 break;
             default:
-                throw new UnknownError("Invalid instruction type for category 4: " + _type);
+                throw new UnknownError(_errMsg);
         }
         return String.format("%s R%d, R%d", typeString, _src1, _src2);
     }
@@ -696,6 +745,10 @@ class InstCat5 extends Instruction {
         super(address, word);
         _type = getInstType(word);
         _dest = getFirstArg(word);
+    }
+
+    public void execute() {
+        // These instruction don't produce a value so nothing to do here.
     }
 
     public static InstCat5 decode(int address, int word) {
@@ -843,19 +896,43 @@ class Memory {
     }
 }
 
+class RegisterFile {
+    final static int numGprs = 32;
+    int[] gprs = new int[numGprs];
+    int lo;
+    int hi;
+
+    public static void copy(RegisterFile dest, RegisterFile source) {
+        for (int k = 0; k < numGprs; ++k) {
+            dest.gprs[k] = source.gprs[k];
+        }
+        dest.lo = source.lo;
+        dest.hi = source.hi;
+    }
+}
+
 class Processor {
     Memory memory;
-    int pc;
-    int[] gprs;
-    int hi;
-    int lo;
+    int pc = 256;
+    int pcNext;
+    RegisterFile regFile = new RegisterFile();
+    RegisterFile regFileNext = new RegisterFile();
 
-    Instruction[] Buf1;
+    Instruction[] Buf1 = new Instruction[8];
+    Instruction[] Buf2 = new Instruction[2];
+    Instruction[] Buf3 = new Instruction[2];
+    Instruction[] Buf4 = new Instruction[2];
+    Instruction[] Buf5 = new Instruction[2];
+    Instruction Buf6;
+    Instruction Buf7;
+    Instruction Buf8;
+    Instruction Buf9;
+    Instruction Buf10;
+    Instruction Buf11;
+    Instruction Buf12;
 
     public Processor(Memory memory) {
         this.memory = memory;
-        pc = 256;
-        gprs = new int[32];
     }
 
     public Processor(String pathString) throws IOException {
@@ -871,78 +948,78 @@ class Processor {
     }
 
     protected void executeBEQ(InstBranchCmpr inst) {
-        if (gprs[inst.rs()] == gprs[inst.rt()]) pc = inst.target() - 4;
+        if (regFile.gprs[inst.rs()] == regFile.gprs[inst.rt()]) pc = inst.target() - 4;
     }
 
     protected void executeBNE(InstBranchCmpr inst) {
-        if (gprs[inst.rs()] != gprs[inst.rt()]) pc = inst.target() - 4;
+        if (regFile.gprs[inst.rs()] != regFile.gprs[inst.rt()]) pc = inst.target() - 4;
     }
 
     protected void executeBGTZ(InstBGTZ inst) {
-        if (gprs[inst.rs()] > 0) pc = inst.target() - 4;
+        if (regFile.gprs[inst.rs()] > 0) pc = inst.target() - 4;
     }
 
     protected void executeSW(InstLoadStore inst) {
-        memory.store(gprs[inst.base()] + inst.offset(), gprs[inst.rt()]);
+        memory.store(regFile.gprs[inst.base()] + inst.offset(), regFile.gprs[inst.rt()]);
     }
 
     protected void executeLW(InstLoadStore inst) {
-        gprs[inst.rt()] = memory.fetch(gprs[inst.base()] + inst.offset());
+        regFile.gprs[inst.rt()] = memory.fetch(regFile.gprs[inst.base()] + inst.offset());
     }
 
     protected void executeADD(InstArithType inst) {
-        gprs[inst.dest()] = gprs[inst.src1()] + gprs[inst.src2()];
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] + regFile.gprs[inst.src2()];
     }
 
     protected void executeSUB(InstArithType inst) {
-        gprs[inst.dest()] = gprs[inst.src1()] - gprs[inst.src2()];
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] - regFile.gprs[inst.src2()];
     }
 
     protected void executeAND(InstArithType inst) {
-        gprs[inst.dest()] = gprs[inst.src1()] & gprs[inst.src2()];
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] & regFile.gprs[inst.src2()];
     }
 
     protected void executeOR(InstArithType inst) {
-        gprs[inst.dest()] = gprs[inst.src1()] | gprs[inst.src2()];
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] | regFile.gprs[inst.src2()];
     }
 
     protected void executeSRL(InstBitShift inst) {
-        gprs[inst.dest()] = gprs[inst.src1()] >>> inst.src2();
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] >>> inst.src2();
     }
 
     protected void executeSRA(InstBitShift inst) {
-        gprs[inst.dest()] = gprs[inst.src1()] >> inst.src2();
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] >> inst.src2();
     }
 
     protected void executeADDI(InstADDI inst) {
-        gprs[inst.dest()] = gprs[inst.src()] + inst.imm();
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src()] + inst.imm();
     }
 
     protected void executeANDI(InstLogicalImm inst) {
-        gprs[inst.dest()] = gprs[inst.src()] & inst.imm();
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src()] & inst.imm();
     }
 
     protected void executeORI(InstLogicalImm inst) {
-        gprs[inst.dest()] = gprs[inst.src()] | inst.imm();
+        regFile.gprs[inst.dest()] = regFile.gprs[inst.src()] | inst.imm();
     }
 
     protected void executeMULT(InstCat4 inst) {
-        long result = gprs[inst.src1()] * gprs[inst.src2()];
-        lo = (int) (result & 0x00000000FFFFFFFFL);
-        hi = (int)((result & 0xFFFFFFFF00000000L) >>> 32);
+        long result = regFile.gprs[inst.src1()] * regFile.gprs[inst.src2()];
+        regFile.lo = (int) (result & 0x00000000FFFFFFFFL);
+        regFile.hi = (int)((result & 0xFFFFFFFF00000000L) >>> 32);
     }
 
     protected void executeDIV(InstCat4 inst) {
-        lo = gprs[inst.src1()] / gprs[inst.src2()];
-        hi = gprs[inst.src1()] % gprs[inst.src2()];
+        regFile.lo = regFile.gprs[inst.src1()] / regFile.gprs[inst.src2()];
+        regFile.hi = regFile.gprs[inst.src1()] % regFile.gprs[inst.src2()];
     }
 
     protected void executeMFHI(InstCat5 inst) {
-        gprs[inst.dest()] = hi;
+        regFile.gprs[inst.dest()] = regFile.hi;
     }
 
     protected void executeMFLO(InstCat5 inst) {
-        gprs[inst.dest()] = lo;
+        regFile.gprs[inst.dest()] = regFile.lo;
     }
 
     protected void execute(Instruction inst) {
@@ -1027,7 +1104,7 @@ class Processor {
     public String getGprState(int index) {
         String[] values = new String[8];
         for (int k = 0; k < 8; ++k, ++index) {
-            values[k] = Integer.toString(gprs[index]);
+            values[k] = Integer.toString(regFile.gprs[index]);
         }
         return String.join("\t", values);
     }
