@@ -3,7 +3,7 @@
 
  /** 
   * A simulator for a pseudo-MIPS ISA.
-  * @author Matthew Carr
+  * Written by Matthew Carr on October 3, 2018.
   */
 
 package cda5155.proj1;
@@ -42,10 +42,18 @@ abstract class Instruction {
         return _type;
     }
 
+    public int arg1Val;
+    public int arg2Val;
+    public int arg3Val;
+    public long result;
+
     public Instruction(int address, int word) throws IllegalArgumentException {
         this._address = address;
         this._word = word;
     }
+
+    // This method should use the argument values and set result.
+    public abstract void execute();
 
     public static int getFirst3Bits(int word) {
         return (word & 0xE0000000) >>> 29;
@@ -183,6 +191,11 @@ class InstJ extends InstCat1 {
         _target = (address + 4) & 0xC0000000 | (word & 0x03FFFFFF) << 2;
     }
 
+    // result contains the target address to jump to
+    public void execute() {
+        result = _target;
+    }
+
     public String disassemble() {
         return String.format("J #%d", _target);
     }
@@ -216,6 +229,30 @@ class InstBranchCmpr extends InstCat1 {
         _rt = Instruction.getSecondArg(word);
         _offset = Instruction.getSignedLower16(word) << 2;
         _target = address + 4 + _offset;
+    }
+
+    // result contains the target address to jump to
+    public void execute() {
+        switch (_type) {
+            case BEQ:
+                if (arg1Val == arg2Val) {
+                    result = _target;
+                }
+                else {
+                    result = _address + 4;
+                }
+                break;
+            case BNE:
+                if (arg1Val != arg2Val) {
+                    result = _target;
+                }
+                else {
+                    result = _address + 4;
+                }
+                break;
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -269,6 +306,16 @@ class InstBGTZ extends InstCat1 {
         _target = _address + 4 + _offset;
     }
 
+    // result contains the target address to jump to
+    public void execute() {
+        if (arg1Val > 0) {
+            result = _target;
+        }
+        else {
+            result = _address + 4;
+        }
+    }
+
     public String disassemble() {
         return String.format("BGTZ R%d, #%d", _rs, _offset);
     }
@@ -296,6 +343,11 @@ class InstLoadStore extends InstCat1 {
         _base = getFirstArg(word);
         _rt = getSecondArg(word);
         _offset = getSignedLower16(word);
+    }
+
+    // result contains the memory address to load or store.
+    public void execute() {
+        result = arg1Val + _offset;
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -329,6 +381,10 @@ class InstBREAK extends InstCat1 {
     public InstBREAK(int address, int word) {
         super(address, word);
         _type = InstType.BREAK;
+    }
+
+    public void execute() {
+        // nothing to do here
     }
 
     public String disassemble() {
@@ -400,8 +456,31 @@ abstract class InstCat2 extends Instruction {
 }
 
 class InstArithType extends InstCat2 {
+    String _errMsg;
+
     public InstArithType(int address, int word) {
         super(address, word);
+        _errMsg = "Invalid instruction type InstArithType: " + _type;
+    }
+
+    // result contains the result of an arithmetic expression.
+    public void execute() {
+        switch (_type) {
+            case ADD:
+                result = arg1Val + arg2Val;
+                break;
+            case SUB:
+                result = arg1Val - arg2Val;
+                break;
+            case AND:
+                result = arg1Val & arg2Val;
+                break;
+            case OR:
+                result = arg1Val | arg2Val;
+                break;
+            default:
+                throw new UnknownError(_errMsg);
+        }
     }
 
     public String disassemble() {
@@ -420,15 +499,32 @@ class InstArithType extends InstCat2 {
                 typeString = "OR";
                 break;
             default:
-                throw new UnknownError("Invalid instruction type InstArithType: " + _type);
+                throw new UnknownError(_errMsg);
         }
         return String.format("%s R%d, R%d, R%d", typeString, _dest, _src1, _src2);
     }
 }
 
 class InstBitShift extends InstCat2 {
+    String _errMsg;
+
     public InstBitShift(int address, int word) {
         super(address, word);
+        _errMsg = "Invalid instruction type for InstBitShift: " + _type;
+    }
+
+    // result contains the output of the bitshift operation.
+    public void execute() {
+        switch (_type) {
+            case SRL:
+                result = arg1Val >>> arg3Val;
+                break;
+            case SRA:
+                result = arg1Val >> arg3Val;
+                break;
+            default:
+                throw new UnknownError(_errMsg);
+        }
     }
 
     public String disassemble() {
@@ -441,7 +537,7 @@ class InstBitShift extends InstCat2 {
                 typeString = "SRA";
                 break;
             default:
-                throw new UnknownError("Invalid instruction type for InstBitShift: " + _type);
+                throw new UnknownError(_errMsg);
         }
         return String.format("%s R%d, R%d, #%d", typeString, _dest, _src1, _src2);
     }
@@ -501,6 +597,11 @@ class InstADDI extends InstCat3 {
         super(address, word);
         _type = InstType.ADDI;
         _imm = getSignedLower16(word);
+    }
+
+    // result contains the output of addition between arg1Val and immediate value
+    public void execute() {
+        result = arg1Val + _imm;
     }
 
     public String disassemble() {
@@ -748,6 +849,8 @@ class Processor {
     int[] gprs;
     int hi;
     int lo;
+
+    Instruction[] Buf1;
 
     public Processor(Memory memory) {
         this.memory = memory;

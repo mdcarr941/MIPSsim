@@ -3,7 +3,7 @@
 
  /** 
   * A simulator for a pseudo-MIPS ISA.
-  * @author Matthew Carr
+  * Written by Matthew Carr on October 3, 2018.
   */
 
 
