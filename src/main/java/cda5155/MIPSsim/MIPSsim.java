@@ -45,7 +45,12 @@ abstract class Instruction {
     public int arg1Val;
     public int arg2Val;
     public int arg3Val;
-    public long result;
+
+    public int result;
+
+    int dest() throws RuntimeException {
+        throw new RuntimeException("dest not implemented");
+    }
 
     public Instruction(int address, int word) throws IllegalArgumentException {
         this._address = address;
@@ -336,6 +341,9 @@ class InstLoadStore extends InstCat1 {
     short offset() {
         return _offset;
     }
+
+    // The data word from memory. To be set by the MEM unit.
+    public int data;
 
     public InstLoadStore(int address, int word) {
         super(address, word);
@@ -897,39 +905,76 @@ class Memory {
 }
 
 class RegisterFile {
+    // The await variables indicate that that register will be written to by
+    // an issued instruction.
     final static int numGprs = 32;
     int[] gprs = new int[numGprs];
+    boolean[] gprsAwait = new boolean[numGprs];
     int lo;
+    boolean loAwait;
     int hi;
+    boolean hiAwait;
+
+    public int gprs(int k) {
+        return gprs[k];
+    }
+
+    public void gprs(int k, int val) {
+        gprs[k] = val;
+        gprsAwait[k] = false;
+    }
+
+    public int lo() {
+        return lo;
+    }
+
+    public void lo(int val) {
+        lo = val;
+        loAwait = false;
+    }
+
+    public int hi() {
+        return hi;
+    }
+
+    public void hi(int val) {
+        hi = val;
+        hiAwait = false;
+    }
 
     public static void copy(RegisterFile dest, RegisterFile source) {
         for (int k = 0; k < numGprs; ++k) {
-            dest.gprs[k] = source.gprs[k];
+            dest.gprs(k, source.gprs[k]);
         }
-        dest.lo = source.lo;
-        dest.hi = source.hi;
+        dest.lo(source.lo());
+        dest.hi(source.hi());
     }
 }
 
+/* ALU2 instructions:
+    ADD, SUB, AND, OR, SRL, SRA,
+    ADDI, ANDI, ORI,
+    MFHI, MFLO
+*/
 class Processor {
     Memory memory;
-    int pc = 256;
-    int pcNext;
+    int pc;
+    int pcNext = 256;
     RegisterFile regFile = new RegisterFile();
     RegisterFile regFileNext = new RegisterFile();
 
     Instruction[] Buf1 = new Instruction[8];
-    Instruction[] Buf2 = new Instruction[2];
-    Instruction[] Buf3 = new Instruction[2];
-    Instruction[] Buf4 = new Instruction[2];
+    InstLoadStore[] Buf2 = new InstLoadStore[2];
+    InstCat4[] Buf3 = new InstCat4[2];
+    InstCat4[] Buf4 = new InstCat4[2];
     Instruction[] Buf5 = new Instruction[2];
-    Instruction Buf6;
-    Instruction Buf7;
-    Instruction Buf8;
+    InstLoadStore Buf6;
+    InstCat4 Buf7;
+    InstCat4 Buf8;
     Instruction Buf9;
-    Instruction Buf10;
-    Instruction Buf11;
-    Instruction Buf12;
+    InstLoadStore Buf10;
+    InstCat4 Buf11;
+    InstCat4 Buf12;
 
     public Processor(Memory memory) {
         this.memory = memory;
@@ -939,24 +984,24 @@ class Processor {
         this(new Memory(pathString));
     }
 
-    protected Instruction fetchAndDecode(int addr) {
-        return Instruction.decode(addr, memory.fetch(addr));
+    protected Instruction fetchAndDecode() {
+        return Instruction.decode(pc, memory.fetch(pc));
     }
 
     protected void executeJ(InstJ inst) {
-        pc = inst.target() - 4;
+        pcNext = inst.target();
     }
 
     protected void executeBEQ(InstBranchCmpr inst) {
-        if (regFile.gprs[inst.rs()] == regFile.gprs[inst.rt()]) pc = inst.target() - 4;
+        if (regFile.gprs[inst.rs()] == regFile.gprs[inst.rt()]) pcNext = inst.target();
     }
 
     protected void executeBNE(InstBranchCmpr inst) {
-        if (regFile.gprs[inst.rs()] != regFile.gprs[inst.rt()]) pc = inst.target() - 4;
+        if (regFile.gprs[inst.rs()] != regFile.gprs[inst.rt()]) pcNext = inst.target();
     }
 
     protected void executeBGTZ(InstBGTZ inst) {
-        if (regFile.gprs[inst.rs()] > 0) pc = inst.target() - 4;
+        if (regFile.gprs[inst.rs()] > 0) pcNext = inst.target();
     }
 
     protected void executeSW(InstLoadStore inst) {
@@ -1088,12 +1133,93 @@ class Processor {
         }
     }
 
+    public static <T extends Object> T getFirstNonNull(T[] array) {
+        int k = 0;
+        for (; k < array.length && array[k] == null; ++k) {}
+        if (k >= array.length) return null;
+        T entry = array[k];
+        array[k] = null;
+        return entry;
+    }
+
+    public static <T extends Instruction> void moveThenExec(T[] source, T dest) {
+        dest = getFirstNonNull(source);
+        if (dest == null) return;
+        dest.execute();
+    }
+
+    public void alu2() {
+        moveThenExec(Buf2, Buf6);
+    }
+
+    public void mem() {
+        InstLoadStore inst = Buf6;
+        Buf6 = null;
+        switch (Buf6.type()) {
+            case LW:
+                inst.data = memory.fetch(inst.result);
+                Buf10 = inst;
+                break;
+            case SW:
+                memory.store(inst.result, regFile.gprs(inst.rt()));
+                break;
+            default:
+                throw new UnknownError("The entry in Buf6 is not a LW nor a SW.");
+        }
+    }
+
+    public void div() {
+        moveThenExec(Buf3, Buf7);
+    }
+
+    public void mul1() {
+        moveThenExec(Buf4, Buf8);
+    }
+
+    public void alu1() {
+        moveThenExec(Buf5, Buf9);
+    }
+
+    public void mul2() {
+        Buf11 = Buf8;
+        Buf8 = null;
+    }
+
+    public void mul3() {
+        Buf12 = Buf11;
+        Buf11 = null;
+    }
+
+    public void writeBack() {
+        if (Buf10 != null) {
+            regFileNext.gprs(Buf10.rt(), Buf10.data);
+            Buf10 = null;
+        }
+        if (Buf7 != null) {
+            regFileNext.lo(Buf7.lo());
+            regFileNext.hi(Buf7.hi());
+            Buf7 = null;
+        }
+        if (Buf12 != null) {
+            regFileNext.lo(Buf7.lo());
+            regFileNext.hi(Buf7.hi());
+            Buf12 = null;
+        }
+        if (Buf9 != null) {
+            regFileNext.gprs(Buf9.dest(), Buf9.result);
+            Buf9 = null;
+        }
+    }
+
     public String simulate() {
         StringBuilder builder = new StringBuilder(8096);
         Instruction inst;
         int maxAddr = memory.maxAddr();
-        for (int cycle = 1; pc < maxAddr; pc += 4, cycle += 1) {
-            inst = fetchAndDecode(pc);
+        // The reverse method is used to simulate concurrency.
+        for (int cycle = 1; pc < maxAddr; cycle += 1) {
+            pc = pcNext;
+            pcNext += 4;
+            inst = fetchAndDecode();
             execute(inst);
             builder.append(cycleSnapshot(cycle, inst));
             if (inst.type() == InstType.BREAK) break;

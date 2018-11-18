@@ -242,35 +242,35 @@ public class AppTest
         return changeLineSep(builder.toString()).trim();
     }
 
-    // public void testMemoryDisassemble() throws IOException {
-    //     String expectedDisassembly = getFileContents("sample_disassembly.txt");
-    //     Memory memory = new Memory("sample.txt");
-    //     String disassembly = memory.disassemble();
-    //     MIPSsim.writeDisassembly(disassembly);
-    //     assertEquals(expectedDisassembly, disassembly);
-    // }
+    public void testMemoryDisassemble() throws IOException {
+        String expectedDisassembly = getFileContents("proj1/sample_disassembly.txt");
+        Memory memory = new Memory("proj1/sample.txt");
+        String disassembly = memory.disassemble();
+        MIPSsim.writeDisassembly(disassembly);
+        assertEquals(expectedDisassembly, disassembly);
+    }
 
-    // public void testProcessorSimulate() throws IOException {
-    //     String expected = getFileContents("sample_simulation.txt");
-    //     Processor proc = new Processor("sample.txt");
-    //     String simulation = proc.simulate();
-    //     MIPSsim.writeSimulation(simulation);
-    //     assertEquals(expected, simulation);
-    // }
+    public void testProcessorSimulate() throws IOException {
+        String expected = getFileContents("proj1/sample_simulation.txt");
+        Processor proc = new Processor("proj1/sample.txt");
+        String simulation = proc.simulate();
+        MIPSsim.writeSimulation(simulation);
+        assertEquals(expected, simulation);
+    }
 
-    // public void testOtherSampleDisassembly() throws IOException {
-    //     String expected = getFileContents("other_disassembly.txt");
-    //     Memory memory = new Memory("other_sample.txt");
-    //     String disassembly = memory.disassemble();
-    //     MIPSsim.write2file(disassembly, "other_disassembly_mine.txt");
-    //     assertEquals(expected, disassembly);
-    // }
+    public void testOtherSampleDisassembly() throws IOException {
+        String expected = getFileContents("proj1/other_disassembly.txt");
+        Memory memory = new Memory("proj1/other_sample.txt");
+        String disassembly = memory.disassemble();
+        MIPSsim.write2file(disassembly, "proj1/other_disassembly_mine.txt");
+        assertEquals(expected, disassembly);
+    }
 
-    // public void testOtherSampleSimulation() throws IOException {
-    //     String expected = getFileContents("other_simulation_wsfixed.txt");
-    //     Processor proc = new Processor("other_sample.txt");
-    //     String simulation = proc.simulate();
-    //     MIPSsim.write2file(simulation, "other_simulation_mine.txt");
-    //     assertEquals(expected, simulation);
-    // }
+    public void testOtherSampleSimulation() throws IOException {
+        String expected = getFileContents("proj1/other_simulation_wsfixed.txt");
+        Processor proc = new Processor("proj1/other_sample.txt");
+        String simulation = proc.simulate();
+        MIPSsim.write2file(simulation, "proj1/other_simulation_mine.txt");
+        assertEquals(expected, simulation);
+    }
 }

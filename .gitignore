@@ -3,3 +3,5 @@ build/
 proj1/
 proj2/
 .vscode/settings.json
+disassembly.txt
+simulation.txt
