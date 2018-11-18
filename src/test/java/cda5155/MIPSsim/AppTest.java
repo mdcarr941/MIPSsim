@@ -228,11 +228,11 @@ public class AppTest
         );
     }
 
-    public String changeLineSep(String input) {
+    public static String changeLineSep(String input) {
         return input.replaceAll("\r\n", MIPSsim.LINE_SEP);
     }
 
-    public String getFileContents(String pathString) throws IOException {
+    public static String getFileContents(String pathString) throws IOException {
         List<String> lines = Files.readAllLines(Paths.get(pathString));
         StringBuilder builder = new StringBuilder();
         int end = lines.size();
@@ -242,35 +242,51 @@ public class AppTest
         return changeLineSep(builder.toString()).trim();
     }
 
-    public void testMemoryDisassemble() throws IOException {
-        String expectedDisassembly = getFileContents("proj1/sample_disassembly.txt");
-        Memory memory = new Memory("proj1/sample.txt");
+    public static void testDisassemble(String input, String output, String expected) throws IOException {
+        String expectedDisassembly = getFileContents(expected);
+        Memory memory = new Memory(input);
         String disassembly = memory.disassemble();
-        MIPSsim.writeDisassembly(disassembly);
+        MIPSsim.write2file(disassembly, output);
         assertEquals(expectedDisassembly, disassembly);
     }
 
+    public static void testSimulate(String input, String output, String expected) throws IOException {
+        String expectedSim = getFileContents(expected);
+        Processor proc = new Processor(input);
+        String simulation = proc.simulate();
+        MIPSsim.write2file(simulation, output);
+        assertEquals(expectedSim, simulation);
+    }
+
+    public static void testMemoryDisassemble() throws IOException {
+        testDisassemble("proj1/sample.txt", "proj1/disassembly.txt", "proj1/sample_disassembly.txt");
+    }
+
+    // public void testProcessorSimulate() throws IOException {
+    //     String expected = getFileContents("proj1/sample_simulation.txt");
+    //     Processor proc = new Processor("proj1/sample.txt");
+    //     String simulation = proc.simulate();
+    //     MIPSsim.write2file(simulation, "proj1/simulation.txt");
+    //     assertEquals(expected, simulation);
+    // }
+
+    public static void testOtherSampleDisassembly() throws IOException {
+        testDisassemble("proj1/other_sample.txt", "proj1/other_disassembly_mine.txt", "proj1/other_disassembly.txt");
+    }
+
+    public static void testProj2Disassembly() throws IOException {
+        testDisassemble("proj2/sample.txt", "proj2/disassembly.txt", "proj2/sample_disassembly.txt");
+    }
+
+    // public void testOtherSampleSimulation() throws IOException {
+    //     String expected = getFileContents("proj1/other_simulation_wsfixed.txt");
+    //     Processor proc = new Processor("proj1/other_sample.txt");
+    //     String simulation = proc.simulate();
+    //     MIPSsim.write2file(simulation, "proj1/other_simulation_mine.txt");
+    //     assertEquals(expected, simulation);
+    // }
+
     public void testProcessorSimulate() throws IOException {
-        String expected = getFileContents("proj1/sample_simulation.txt");
-        Processor proc = new Processor("proj1/sample.txt");
-        String simulation = proc.simulate();
-        MIPSsim.writeSimulation(simulation);
-        assertEquals(expected, simulation);
-    }
-
-    public void testOtherSampleDisassembly() throws IOException {
-        String expected = getFileContents("proj1/other_disassembly.txt");
-        Memory memory = new Memory("proj1/other_sample.txt");
-        String disassembly = memory.disassemble();
-        MIPSsim.write2file(disassembly, "proj1/other_disassembly_mine.txt");
-        assertEquals(expected, disassembly);
-    }
-
-    public void testOtherSampleSimulation() throws IOException {
-        String expected = getFileContents("proj1/other_simulation_wsfixed.txt");
-        Processor proc = new Processor("proj1/other_sample.txt");
-        String simulation = proc.simulate();
-        MIPSsim.write2file(simulation, "proj1/other_simulation_mine.txt");
-        assertEquals(expected, simulation);
+        testSimulate("proj2/sample.txt", "proj2/simulation.txt", "proj2/sample_simulation.txt");
     }
 }

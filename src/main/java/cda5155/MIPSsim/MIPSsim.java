@@ -42,14 +42,35 @@ abstract class Instruction {
         return _type;
     }
 
-    public int arg1Val;
-    public int arg2Val;
-    public int arg3Val;
+    // The value -1 is used as 
+    // the default so that instruction which do not have source or destination
+    // registers will be seen as non-conflicting by the the issue unit.
 
-    public int result;
+    // The index of the destination gpr.
+    int dest() {
+        return -1;
+    }
 
-    int dest() throws RuntimeException {
-        throw new RuntimeException("dest not implemented");
+    // The index of the gpr for the first source argument.
+    int src1() {
+        return -1;
+    }
+
+    // The value of the first source argument. To be set by the issue unit.
+    public int src1val;
+
+    // The index of the gpr for the second source argument.
+    int src2() {
+        return -1;
+    }
+
+    // The value of the second source argument. To be set by the issue unit.
+    public int src2val;
+
+    // The result of the instruction's computation. Varies between instructions.
+    protected int _result;
+    int result() throws RuntimeException {
+        return _result;
     }
 
     public Instruction(int address, int word) throws IllegalArgumentException {
@@ -152,9 +173,9 @@ abstract class InstCat1 extends Instruction {
             case 3:
                 return new InstBGTZ(address, word);
             case 4:
-                return new InstLoadStore(address, word);
+                return new InstSW(address, word);
             case 5:
-                return new InstLoadStore(address, word);
+                return new InstLW(address, word);
             case 6:
                 return new InstBREAK(address, word);
             default:
@@ -198,7 +219,7 @@ class InstJ extends InstCat1 {
 
     // result contains the target address to jump to.
     public void execute() {
-        result = _target;
+        _result = _target;
     }
 
     public String disassemble() {
@@ -208,12 +229,12 @@ class InstJ extends InstCat1 {
 
 class InstBranchCmpr extends InstCat1 {
     protected int _rs;
-    int rs() {
+    int src1() {
         return _rs;
     }
 
     protected int _rt;
-    int rt() {
+    int src2() {
         return _rt;
     }
 
@@ -240,19 +261,19 @@ class InstBranchCmpr extends InstCat1 {
     public void execute() {
         switch (_type) {
             case BEQ:
-                if (arg1Val == arg2Val) {
-                    result = _target;
+                if (src1val == src2val) {
+                    _result = _target;
                 }
                 else {
-                    result = _address + 4;
+                    _result = _address + 4;
                 }
                 break;
             case BNE:
-                if (arg1Val != arg2Val) {
-                    result = _target;
+                if (src1val != src2val) {
+                    _result = _target;
                 }
                 else {
-                    result = _address + 4;
+                    _result = _address + 4;
                 }
                 break;
             default:
@@ -289,7 +310,7 @@ class InstBranchCmpr extends InstCat1 {
 
 class InstBGTZ extends InstCat1 {
     protected int _rs;
-    int rs() {
+    int src1() {
         return _rs;
     }
 
@@ -313,11 +334,11 @@ class InstBGTZ extends InstCat1 {
 
     // result contains the target address to jump to.
     public void execute() {
-        if (arg1Val > 0) {
-            result = _target;
+        if (src1val > 0) {
+            _result = _target;
         }
         else {
-            result = _address + 4;
+            _result = _address + 4;
         }
     }
 
@@ -326,16 +347,13 @@ class InstBGTZ extends InstCat1 {
     }
 }
 
-class InstLoadStore extends InstCat1 {
+abstract class InstLoadStore extends InstCat1 {
     protected int _base;
-    int base() {
+    int src1() {
         return _base;
     }
 
     protected int _rt;
-    int rt() {
-        return _rt;
-    }
 
     protected short _offset;
     short offset() {
@@ -355,7 +373,7 @@ class InstLoadStore extends InstCat1 {
 
     // result contains the memory address to load or store.
     public void execute() {
-        result = arg1Val + _offset;
+        _result = src1val + _offset;
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -382,6 +400,26 @@ class InstLoadStore extends InstCat1 {
                 throw new IllegalArgumentException(unknownInstMsg);
         }
         return String.format("%s R%d, %d(R%d)", instString, _rt, _offset, _base);
+    }
+}
+
+class InstLW extends InstLoadStore {
+    int dest() {
+        return _rt;
+    }
+
+    public InstLW(int address, int word) {
+        super(address, word);
+    }
+}
+
+class InstSW extends InstLoadStore {
+    int src2() {
+        return _rt;
+    }
+
+    public InstSW(int address, int word) {
+        super(address, word);
     }
 }
 
@@ -475,16 +513,16 @@ class InstArithType extends InstCat2 {
     public void execute() {
         switch (_type) {
             case ADD:
-                result = arg1Val + arg2Val;
+                _result = src1val + src2val;
                 break;
             case SUB:
-                result = arg1Val - arg2Val;
+                _result = src1val - src2val;
                 break;
             case AND:
-                result = arg1Val & arg2Val;
+                _result = src1val & src2val;
                 break;
             case OR:
-                result = arg1Val | arg2Val;
+                _result = src1val | src2val;
                 break;
             default:
                 throw new UnknownError(_errMsg);
@@ -525,10 +563,10 @@ class InstBitShift extends InstCat2 {
     public void execute() {
         switch (_type) {
             case SRL:
-                result = arg1Val >>> arg3Val;
+                _result = src1val >>> src2val;
                 break;
             case SRA:
-                result = arg1Val >> arg3Val;
+                _result = src1val >> src2val;
                 break;
             default:
                 throw new UnknownError(_errMsg);
@@ -558,7 +596,7 @@ abstract class InstCat3 extends Instruction {
     }
 
     protected int _src;
-    int src() {
+    int src1() {
         return _src;
     }
 
@@ -607,9 +645,9 @@ class InstADDI extends InstCat3 {
         _imm = getSignedLower16(word);
     }
 
-    // result contains the output of addition between arg1Val and immediate value
+    // result contains the output of addition between src1val and immediate value
     public void execute() {
-        result = arg1Val + _imm;
+        _result = src1val + _imm;
     }
 
     public String disassemble() {
@@ -633,14 +671,14 @@ class InstLogicalImm extends InstCat3 {
     }
 
     // result contains the result of the logical operator between
-    // arg1Val and the immediate value.
+    // src1val and the immediate value.
     public void execute() {
         switch (_type) {
             case ANDI:
-                result = arg1Val & _imm;
+                _result = src1val & _imm;
                 break;
             case ORI:
-                result = arg1Val | _imm;
+                _result = src1val | _imm;
                 break;
             default:
 
@@ -665,6 +703,10 @@ class InstLogicalImm extends InstCat3 {
 
 class InstCat4 extends Instruction {
     protected String _errMsg;
+
+    int dest() {
+        return RegisterFile.LO_HI_INDEX;
+    }
 
     protected int _src1;
     int src1() {
@@ -698,14 +740,14 @@ class InstCat4 extends Instruction {
     public void execute() {
         switch (_type) {
             case MULT:
-                result = arg1Val * arg2Val;
-                _lo = (int) (result & 0x00000000FFFFFFFFL);
-                _hi = (int)((result & 0xFFFFFFFF00000000L) >>> 32);
+                long tmp = src1val * src2val;
+                _lo = (int) (tmp & 0x00000000FFFFFFFFL);
+                _hi = (int)((tmp & 0xFFFFFFFF00000000L) >>> 32);
                 break;
             case DIV:
-                result = arg1Val / arg2Val;
-                _lo = (int)result;
-                _hi = arg1Val % arg2Val;
+                _result = src1val / src2val;
+                _lo = _result;
+                _hi = src1val % src2val;
                 break;
             default:
                 throw new UnknownError(_errMsg);
@@ -743,7 +785,7 @@ class InstCat4 extends Instruction {
     }
 }
 
-class InstCat5 extends Instruction {
+abstract class InstCat5 extends Instruction {
     protected int _dest;
     int dest() {
         return _dest;
@@ -756,11 +798,18 @@ class InstCat5 extends Instruction {
     }
 
     public void execute() {
-        // These instruction don't produce a value so nothing to do here.
+        // These instruction don't compute anything, so nothing to do here.
     }
 
     public static InstCat5 decode(int address, int word) {
-        return new InstCat5(address, word);
+        switch (getSecond3Bits(word)) {
+            case 0:
+                return new InstMFHI(address, word);
+            case 1:
+                return new InstMFLO(address, word);
+            default:
+                throw new IllegalArgumentException(unknownInstMsg);
+        }
     }
 
     public static InstType getInstType(int word) throws IllegalArgumentException {
@@ -787,6 +836,26 @@ class InstCat5 extends Instruction {
                 throw new UnknownError("Invalid instruction type for category 5: " + _type);
         }
         return String.format("%s R%d", typeString, _dest);
+    }
+}
+
+class InstMFHI extends InstCat5 {
+    int src1() {
+        return RegisterFile.HI_INDEX;
+    }
+
+    public InstMFHI(int address, int word) {
+        super(address, word);
+    }
+}
+
+class InstMFLO extends InstCat5 {
+    int src1() {
+        return RegisterFile.LO_INDEX;
+    }
+
+    public InstMFLO(int address, int word) {
+        super(address, word);
     }
 }
 
@@ -905,49 +974,69 @@ class Memory {
 }
 
 class RegisterFile {
-    // The await variables indicate that that register will be written to by
-    // an issued instruction.
+    static final int LO_INDEX = 32;
+    static final int HI_INDEX = 33;
+    // This must not be a valid index for the registers array.
+    static final int LO_HI_INDEX = 255;
+
     final static int numGprs = 32;
-    int[] gprs = new int[numGprs];
-    boolean[] gprsAwait = new boolean[numGprs];
-    int lo;
-    boolean loAwait;
-    int hi;
-    boolean hiAwait;
+    final static int numRegisters = numGprs + 2;
+    private int[] registers = new int[numRegisters];
+    // The await array indicates that a register is awaiting the output of
+    // an issued instruction.
+    private boolean[] registersAwait = new boolean[numRegisters];
 
-    public int gprs(int k) {
-        return gprs[k];
-    }
-
-    public void gprs(int k, int val) {
-        gprs[k] = val;
-        gprsAwait[k] = false;
+    public int get(int index) {
+        if (-1 == index) return 0;
+        return registers[index];
     }
 
     public int lo() {
-        return lo;
-    }
-
-    public void lo(int val) {
-        lo = val;
-        loAwait = false;
+        return registers[LO_INDEX];
     }
 
     public int hi() {
-        return hi;
+        return registers[HI_INDEX];
     }
 
-    public void hi(int val) {
-        hi = val;
-        hiAwait = false;
+    public void set(int index, int val) {
+        if (-1 == index) return;
+        registers[index] = val;
+        registersAwait[index] = false;
+    }
+
+    public boolean getAwaiting(int index) {
+        if (-1 == index) {
+            return false;
+        }
+        else if (LO_HI_INDEX == index) {
+            return registersAwait[LO_INDEX] || registersAwait[HI_INDEX];
+        }
+        return registersAwait[index];
+    }
+
+    public boolean getAwaiting(Instruction inst) {
+        return getAwaiting(inst.dest()) || getAwaiting(inst.src1())
+            || getAwaiting(inst.src2());
+    }
+
+    public void setAwaiting(int index) {
+        if (-1 == index) {
+            return;
+        }
+        else if (LO_HI_INDEX == index) {
+            registersAwait[LO_INDEX] = true;
+            registersAwait[HI_INDEX] = true;
+            return;
+        }
+        registersAwait[index] = true;
     }
 
     public static void copy(RegisterFile dest, RegisterFile source) {
         for (int k = 0; k < numGprs; ++k) {
-            dest.gprs(k, source.gprs[k]);
+            dest.registers[k] = source.registers[k];
+            dest.registersAwait[k] = source.registersAwait[k];
         }
-        dest.lo(source.lo());
-        dest.hi(source.hi());
     }
 }
 
@@ -972,7 +1061,7 @@ class Processor {
     InstCat4 Buf7;
     InstCat4 Buf8;
     Instruction Buf9;
-    InstLoadStore Buf10;
+    InstLW Buf10;
     InstCat4 Buf11;
     InstCat4 Buf12;
 
@@ -982,155 +1071,6 @@ class Processor {
 
     public Processor(String pathString) throws IOException {
         this(new Memory(pathString));
-    }
-
-    protected Instruction fetchAndDecode() {
-        return Instruction.decode(pc, memory.fetch(pc));
-    }
-
-    protected void executeJ(InstJ inst) {
-        pcNext = inst.target();
-    }
-
-    protected void executeBEQ(InstBranchCmpr inst) {
-        if (regFile.gprs[inst.rs()] == regFile.gprs[inst.rt()]) pcNext = inst.target();
-    }
-
-    protected void executeBNE(InstBranchCmpr inst) {
-        if (regFile.gprs[inst.rs()] != regFile.gprs[inst.rt()]) pcNext = inst.target();
-    }
-
-    protected void executeBGTZ(InstBGTZ inst) {
-        if (regFile.gprs[inst.rs()] > 0) pcNext = inst.target();
-    }
-
-    protected void executeSW(InstLoadStore inst) {
-        memory.store(regFile.gprs[inst.base()] + inst.offset(), regFile.gprs[inst.rt()]);
-    }
-
-    protected void executeLW(InstLoadStore inst) {
-        regFile.gprs[inst.rt()] = memory.fetch(regFile.gprs[inst.base()] + inst.offset());
-    }
-
-    protected void executeADD(InstArithType inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] + regFile.gprs[inst.src2()];
-    }
-
-    protected void executeSUB(InstArithType inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] - regFile.gprs[inst.src2()];
-    }
-
-    protected void executeAND(InstArithType inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] & regFile.gprs[inst.src2()];
-    }
-
-    protected void executeOR(InstArithType inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] | regFile.gprs[inst.src2()];
-    }
-
-    protected void executeSRL(InstBitShift inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] >>> inst.src2();
-    }
-
-    protected void executeSRA(InstBitShift inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src1()] >> inst.src2();
-    }
-
-    protected void executeADDI(InstADDI inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src()] + inst.imm();
-    }
-
-    protected void executeANDI(InstLogicalImm inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src()] & inst.imm();
-    }
-
-    protected void executeORI(InstLogicalImm inst) {
-        regFile.gprs[inst.dest()] = regFile.gprs[inst.src()] | inst.imm();
-    }
-
-    protected void executeMULT(InstCat4 inst) {
-        long result = regFile.gprs[inst.src1()] * regFile.gprs[inst.src2()];
-        regFile.lo = (int) (result & 0x00000000FFFFFFFFL);
-        regFile.hi = (int)((result & 0xFFFFFFFF00000000L) >>> 32);
-    }
-
-    protected void executeDIV(InstCat4 inst) {
-        regFile.lo = regFile.gprs[inst.src1()] / regFile.gprs[inst.src2()];
-        regFile.hi = regFile.gprs[inst.src1()] % regFile.gprs[inst.src2()];
-    }
-
-    protected void executeMFHI(InstCat5 inst) {
-        regFile.gprs[inst.dest()] = regFile.hi;
-    }
-
-    protected void executeMFLO(InstCat5 inst) {
-        regFile.gprs[inst.dest()] = regFile.lo;
-    }
-
-    protected void execute(Instruction inst) {
-        switch (inst.type()) {
-            case J:
-                executeJ((InstJ)inst);
-                return;
-            case BEQ:
-                executeBEQ((InstBranchCmpr)inst);
-                return;
-            case BNE:
-                executeBNE((InstBranchCmpr)inst);
-                return;
-            case BGTZ:
-                executeBGTZ((InstBGTZ)inst);
-                return;
-            case SW:
-                executeSW((InstLoadStore)inst);
-                return;
-            case LW:
-                executeLW((InstLoadStore)inst);
-                return;
-            case BREAK:
-                return;
-            case ADD:
-                executeADD((InstArithType)inst);
-                return;
-            case SUB:
-                executeSUB((InstArithType)inst);
-                return;
-            case AND:
-                executeAND((InstArithType)inst);
-                return;
-            case OR:
-                executeOR((InstArithType)inst);
-                return;
-            case SRL:
-                executeSRL((InstBitShift)inst);
-                return;
-            case SRA:
-                executeSRA((InstBitShift)inst);
-                return;
-            case ADDI:
-                executeADDI((InstADDI)inst);
-                return;
-            case ANDI:
-                executeANDI((InstLogicalImm)inst);
-                return;
-            case ORI:
-                executeORI((InstLogicalImm)inst);
-                return;
-            case MULT:
-                executeMULT((InstCat4)inst);
-                return;
-            case DIV:
-                executeDIV((InstCat4)inst);
-                return;
-            case MFHI:
-                executeMFHI((InstCat5)inst);
-                return;
-            case MFLO:
-                executeMFLO((InstCat5)inst);
-                return;
-            default:
-                throw new UnknownError();
-        }
     }
 
     public static <T extends Object> T getFirstNonNull(T[] array) {
@@ -1148,36 +1088,213 @@ class Processor {
         dest.execute();
     }
 
+    public static int firstNullIndex(Object[] array, int start) {
+        for (int k = start; k < array.length; ++k) {
+            if (array[k] == null) return k;
+        }
+        return -1;
+    }
+
+    public static int firstNullIndex(Object[] array) {
+        return firstNullIndex(array, 0);
+    }
+
+    // consolidate all the non-null entries of array so they are contiguous at
+    // the beginning of the array.
+    public static void consolidate(Object[] array) {
+        int index = firstNullIndex(array);
+        if (index < 0) return;
+        for (int k = index + 1; k < array.length; ++k) {
+            if (array[k] != null) {
+                array[index] = array[k];
+                array[k] = null;
+                index = k;
+            }
+        }
+    }
+
+    public boolean rawPresent(int address, int src1, int src2) {
+        int dest;
+        for (Instruction inst : Buf1) {
+            if (inst == null) continue;
+            if (inst.address() >= address) return false;
+            dest = inst.dest();
+            if (RegisterFile.LO_HI_INDEX == dest) {
+                if (RegisterFile.LO_INDEX == src1 || RegisterFile.HI_INDEX == src1
+                 || RegisterFile.LO_INDEX == src2 || RegisterFile.HI_INDEX == src2) {
+                    return true;
+                }
+            }
+            if (dest == src1 || dest == src2) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    InstCat1 waitingBranch;
+    InstCat1 executedBranch;
+
+    protected void tryExecWaitingBranch() {
+        if (null == waitingBranch) return;
+        if (regFile.getAwaiting(waitingBranch.src1())
+            || regFile.getAwaiting(waitingBranch.src2())) {
+            return;
+        }
+        if (rawPresent(waitingBranch.address(), waitingBranch.src1(), waitingBranch.src2()))
+            return;
+        waitingBranch.src1val = regFile.get(waitingBranch.src1());
+        waitingBranch.src2val = regFile.get(waitingBranch.src2());
+        waitingBranch.execute();
+        pcNext = waitingBranch.result();
+        executedBranch = waitingBranch;
+        waitingBranch = null;
+    }
+
+    protected boolean fetch() {
+        executedBranch = null;
+        consolidate(Buf1);
+        if (null != waitingBranch) {
+            tryExecWaitingBranch();
+            return true;
+        }
+
+        int index = firstNullIndex(Buf1);
+        if (index < 0) return true;
+
+        Instruction inst;
+        loop:
+            for (int addr = pc; addr < pc + 16 && index < Buf1.length && addr < memory.maxAddr()
+            ; addr += 4) {
+                inst = Instruction.decode(addr, memory.fetch(addr));
+                switch (inst.type()) {
+                    case J:
+                    case BEQ:
+                    case BNE:
+                    case BGTZ:
+                        waitingBranch = (InstCat1)inst;
+                        tryExecWaitingBranch();
+                        break loop;
+                    case BREAK:
+                        executedBranch = (InstCat1)inst;
+                        return false;
+                    default:
+                        // put the instruction in Buf1.
+                        Buf1[index++] = inst;
+                }
+            }
+        return true;
+    }
+
+    public boolean warPresent(int address, int dest) {
+        if (RegisterFile.LO_HI_INDEX == dest) {
+            int src1, src2;
+            for (Instruction inst : Buf1) {
+                if (inst == null) continue;
+                if (inst.address() >= address) return false;
+                src1 = inst.src1();
+                src2 = inst.src2();
+                if (RegisterFile.LO_INDEX == src1 || RegisterFile.HI_INDEX == src1
+                 || RegisterFile.LO_INDEX == src2 || RegisterFile.HI_INDEX == src2) {
+                    return true;
+                }
+            }
+        }
+        else {
+            for (Instruction inst : Buf1) {
+                if (inst == null) continue;
+                if (inst.address() >= address) return false;
+                if (inst.src1() == dest || inst.src2() == dest) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public boolean earlierSW(int address) {
+        for (Instruction inst : Buf1) {
+            if (inst == null) continue;
+            if (inst.address() >= address) return false;
+            if (inst.type() == InstType.SW) return true;
+        }
+        return false;
+    }
+
+    public void issueIfSpace(int k, Instruction[] buf) {
+        Instruction inst = Buf1[k];
+        // Check to see if there is space in the destination buffer.
+        int index = firstNullIndex(buf);
+        if (index < 0) return;
+        // Read operands and update the scoreboard.
+        inst.src1val = regFile.get(inst.src1());
+        inst.src2val = regFile.get(inst.src2());
+        regFile.setAwaiting(inst.dest());
+        // Copy the instruction to the destination and remove it from the source.
+        buf[index] = inst;
+        Buf1[k] = null;
+    }
+
+    public void issue() {
+        Instruction inst;
+        for (int k = 0; k < Buf1.length; ++k) {
+            inst = Buf1[k];
+            if (inst == null) continue;
+            if (regFile.getAwaiting(inst)) continue;
+            if (rawPresent(inst.address(), inst.src1(), inst.src2())
+                || warPresent(inst.address(), inst.dest())) continue;
+            switch (inst.type()) {
+                case LW:
+                case SW:
+                    if (earlierSW(inst.address())) continue;
+                    issueIfSpace(k, Buf2);
+                    break;
+                case DIV:
+                    issueIfSpace(k, Buf3);
+                    break;
+                case MULT:
+                    issueIfSpace(k, Buf4);
+                    break;
+                default:
+                    issueIfSpace(k, Buf5);
+            }
+        }
+    }
+
     public void alu2() {
         moveThenExec(Buf2, Buf6);
+        consolidate(Buf2);
     }
 
     public void mem() {
-        InstLoadStore inst = Buf6;
-        Buf6 = null;
+        if (null == Buf6) return;
         switch (Buf6.type()) {
             case LW:
-                inst.data = memory.fetch(inst.result);
-                Buf10 = inst;
+                Buf6.data = memory.fetch(Buf6.result());
+                Buf10 = (InstLW)Buf6;
                 break;
             case SW:
-                memory.store(inst.result, regFile.gprs(inst.rt()));
+                memory.store(Buf6.result(), regFile.get(Buf6.src2()));
                 break;
             default:
                 throw new UnknownError("The entry in Buf6 is not a LW nor a SW.");
         }
+        Buf6 = null;
     }
 
     public void div() {
         moveThenExec(Buf3, Buf7);
+        consolidate(Buf3);
     }
 
     public void mul1() {
         moveThenExec(Buf4, Buf8);
+        consolidate(Buf4);
     }
 
     public void alu1() {
         moveThenExec(Buf5, Buf9);
+        consolidate(Buf5);
     }
 
     public void mul2() {
@@ -1192,45 +1309,52 @@ class Processor {
 
     public void writeBack() {
         if (Buf10 != null) {
-            regFileNext.gprs(Buf10.rt(), Buf10.data);
+            regFileNext.set(Buf10.dest(), Buf10.data);
             Buf10 = null;
         }
         if (Buf7 != null) {
-            regFileNext.lo(Buf7.lo());
-            regFileNext.hi(Buf7.hi());
+            regFileNext.set(RegisterFile.LO_INDEX, Buf7.lo());
+            regFileNext.set(RegisterFile.HI_INDEX, Buf7.hi());
             Buf7 = null;
         }
         if (Buf12 != null) {
-            regFileNext.lo(Buf7.lo());
-            regFileNext.hi(Buf7.hi());
+            regFileNext.set(RegisterFile.LO_INDEX, Buf12.lo());
+            regFileNext.set(RegisterFile.HI_INDEX, Buf12.hi());
             Buf12 = null;
         }
         if (Buf9 != null) {
-            regFileNext.gprs(Buf9.dest(), Buf9.result);
+            regFileNext.set(Buf9.dest(), Buf9.result());
             Buf9 = null;
         }
     }
 
+    int cycle = 1;
+
     public String simulate() {
         StringBuilder builder = new StringBuilder(8096);
-        Instruction inst;
-        int maxAddr = memory.maxAddr();
+        int cycle = 0;
         // The reverse method is used to simulate concurrency.
-        for (int cycle = 1; pc < maxAddr; cycle += 1) {
+        do {
+            builder.append(cycleSnapshot(cycle++));
             pc = pcNext;
-            pcNext += 4;
-            inst = fetchAndDecode();
-            execute(inst);
-            builder.append(cycleSnapshot(cycle, inst));
-            if (inst.type() == InstType.BREAK) break;
-        }
+            RegisterFile.copy(regFile, regFileNext);
+            writeBack();
+            mem();
+            alu2();
+            div();
+            mul3();
+            mul2();
+            mul1();
+            alu1();
+            issue();
+        } while (fetch());
         return builder.toString().trim();
     }
 
     public String getGprState(int index) {
         String[] values = new String[8];
         for (int k = 0; k < 8; ++k, ++index) {
-            values[k] = Integer.toString(regFile.gprs[index]);
+            values[k] = Integer.toString(regFile.get(index));
         }
         return String.join("\t", values);
     }
@@ -1243,20 +1367,97 @@ class Processor {
         return String.join("\t", values);
     }
 
-    public String cycleSnapshot(int cycle, Instruction inst) {
+    public static void bufferSnapshot(StringBuilder builder, Instruction[] buf, String name) {
         String newLine = MIPSsim.LINE_SEP;
-        StringBuilder builder = new StringBuilder(220);
+        builder.append(name + ":" + newLine);
+        for (int k = 0; k < buf.length; ++k) {
+            builder.append(String.format("\tEntry %d:", k));
+            if (null != buf[k])
+                builder.append(String.format(" [%s]%n", buf[k].disassemble()));
+            else
+                builder.append(newLine);
+        }
+    }
+
+    public String cycleSnapshot(int cycle) {
+        if (0 == cycle) return "";
+        String newLine = MIPSsim.LINE_SEP;
+        StringBuilder builder = new StringBuilder(480);
         builder.append("--------------------" + newLine);
-        builder.append(String.format("Cycle %d:\t%d\t%s%n", cycle, inst.address(), inst.disassemble()));
-        builder.append(newLine + "Registers" + newLine);
+        builder.append(String.format("Cycle %d:%n%n", cycle));
+
+        builder.append("IF:" + newLine);
+        builder.append(String.format("\tWaiting:"));
+        if (waitingBranch != null)
+            builder.append(String.format(" [%s]%n", waitingBranch.disassemble()));
+        else
+            builder.append(newLine);
+        builder.append("\tExecuted: ");
+        if (executedBranch != null)
+            builder.append(String.format(" [%s]%n", executedBranch.disassemble()));
+        else
+            builder.append(newLine);
+
+        bufferSnapshot(builder, Buf1, "Buf1");
+        bufferSnapshot(builder, Buf2, "Buf2");
+        bufferSnapshot(builder, Buf3, "Buf3");
+        bufferSnapshot(builder, Buf4, "Buf4");
+        bufferSnapshot(builder, Buf5, "Buf5");
+
+        builder.append("Buf6:");
+        if (null != Buf6)
+            builder.append(String.format(" [%s]%n", Buf6.disassemble()));
+        else
+            builder.append(newLine);
+
+        builder.append("Buf7:");
+        if (null != Buf7)
+            builder.append(String.format(" [%d, %d]%n", Buf7.hi(), Buf7.lo()));
+        else
+            builder.append(newLine);
+        
+        builder.append("Buf8:");
+        if (null != Buf8)
+            builder.append(String.format(" [%s]%n", Buf8.disassemble()));
+        else
+            builder.append(newLine);
+
+        builder.append("Buf9:");
+        if (null != Buf9)
+            builder.append(String.format(" [%d, R%d]%n", Buf9.result(), Buf9.dest()));
+        else
+            builder.append(newLine);
+
+        builder.append("Buf10:");
+        if (null != Buf10)
+            builder.append(String.format(" [%d, R%d]%n", Buf10.data, Buf10.dest()));
+        else
+            builder.append(newLine);
+
+        builder.append("Buf11:");
+        if (null != Buf11)
+            builder.append(String.format(" [%s]%n", Buf11.disassemble()));
+        else
+            builder.append(newLine);
+
+        builder.append("Buf12:");
+        if (null != Buf12)
+            builder.append(String.format(" [%d]%n", Buf12.result()));
+        else
+            builder.append(newLine);
+
+        builder.append(newLine);
+        builder.append("Registers" + newLine);
         for (int k = 0; k < 32; k += 8) {
             builder.append(String.format("R%02d:\t%s%n", k, getGprState(k)));
         }
-        builder.append(newLine + "Data" + newLine);
+        builder.append(String.format("HI:\t%d%n", regFile.hi()));
+        builder.append(String.format("LO:\t%d%n", regFile.lo()));
+        builder.append(newLine);
+        builder.append("Data" + newLine);
         for (int k = memory.dataStartAddr(); k < memory.maxAddr(); k += 32) {
             builder.append(String.format("%d:\t%s%n", k, getDataState(k)));
         }
-        builder.append(newLine);
         return builder.toString();
     }
 }
