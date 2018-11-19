@@ -228,6 +228,27 @@ public class AppTest
         );
     }
 
+    public void testConsolidate() {
+        String[] buf = new String[] {"a", null, "b", null, "c"};
+        Processor.consolidate(buf);
+        assertEquals("a", buf[0]);
+        assertEquals("b", buf[1]);
+        assertEquals("c", buf[2]);
+        assertEquals(null, buf[3]);
+        assertEquals(null, buf[4]);
+
+        String[] bufClone = buf.clone();
+        Processor.consolidate(buf);
+        for (int k = 0; k < buf.length; ++k) {
+            assertEquals(bufClone[k], buf[k]);
+        }
+    }
+
+    public void testGetFirstNonNull() {
+        String[] buf = new String[] {null, null, "a", null, "b"};
+        assertEquals("a", Processor.getFirstNonNull(buf));
+    }
+
     public static String changeLineSep(String input) {
         return input.replaceAll("\r\n", MIPSsim.LINE_SEP);
     }

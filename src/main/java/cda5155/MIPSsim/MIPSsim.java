@@ -1082,12 +1082,6 @@ class Processor {
         return entry;
     }
 
-    public static <T extends Instruction> void moveThenExec(T[] source, T dest) {
-        dest = getFirstNonNull(source);
-        if (dest == null) return;
-        dest.execute();
-    }
-
     public static int firstNullIndex(Object[] array, int start) {
         for (int k = start; k < array.length; ++k) {
             if (array[k] == null) return k;
@@ -1229,7 +1223,7 @@ class Processor {
         // Read operands and update the scoreboard.
         inst.src1val = regFile.get(inst.src1());
         inst.src2val = regFile.get(inst.src2());
-        regFile.setAwaiting(inst.dest());
+        regFileNext.setAwaiting(inst.dest());
         // Copy the instruction to the destination and remove it from the source.
         buf[index] = inst;
         Buf1[k] = null;
@@ -1262,8 +1256,10 @@ class Processor {
     }
 
     public void alu2() {
-        moveThenExec(Buf2, Buf6);
+        Buf6 = getFirstNonNull(Buf2);
         consolidate(Buf2);
+        if (null == Buf6) return;
+        Buf6.execute();
     }
 
     public void mem() {
@@ -1283,18 +1279,24 @@ class Processor {
     }
 
     public void div() {
-        moveThenExec(Buf3, Buf7);
+        Buf7 = getFirstNonNull(Buf3);
         consolidate(Buf3);
+        if (null == Buf7) return;
+        Buf7.execute();
     }
 
     public void mul1() {
-        moveThenExec(Buf4, Buf8);
+        Buf8 = getFirstNonNull(Buf4);
         consolidate(Buf4);
+        if (null == Buf8) return;
+        Buf8.execute();
     }
 
     public void alu1() {
-        moveThenExec(Buf5, Buf9);
+        Buf9 = getFirstNonNull(Buf5);
         consolidate(Buf5);
+        if (null == Buf9) return;
+        Buf9.execute();
     }
 
     public void mul2() {
@@ -1333,11 +1335,12 @@ class Processor {
     public String simulate() {
         StringBuilder builder = new StringBuilder(8096);
         int cycle = 0;
-        // The reverse method is used to simulate concurrency.
+        // The reverse method is used to emulate concurrency.
         do {
-            builder.append(cycleSnapshot(cycle++));
+            if (cycle > 72) break; // DEBUG
             pc = pcNext;
             RegisterFile.copy(regFile, regFileNext);
+            builder.append(cycleSnapshot(cycle++));
             writeBack();
             mem();
             alu2();
@@ -1348,6 +1351,7 @@ class Processor {
             alu1();
             issue();
         } while (fetch());
+        builder.append(cycleSnapshot(cycle++));
         return builder.toString().trim();
     }
 
