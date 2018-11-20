@@ -798,7 +798,7 @@ abstract class InstCat5 extends Instruction {
     }
 
     public void execute() {
-        // These instruction don't compute anything, so nothing to do here.
+        _result = src1val;
     }
 
     public static InstCat5 decode(int address, int word) {
@@ -1033,30 +1033,23 @@ class RegisterFile {
     }
 
     public static void copy(RegisterFile dest, RegisterFile source) {
-        for (int k = 0; k < numGprs; ++k) {
+        for (int k = 0; k < numRegisters; ++k) {
             dest.registers[k] = source.registers[k];
             dest.registersAwait[k] = source.registersAwait[k];
         }
     }
 }
 
-/* ALU2 instructions:
-    ADD, SUB, AND, OR, SRL, SRA,
-    ADDI, ANDI, ORI,
-    MFHI, MFLO
-*/
-class Processor {
-    Memory memory;
-    int pc;
-    int pcNext = 256;
+class ProcessorState {
+    int pc = 256;
     RegisterFile regFile = new RegisterFile();
-    RegisterFile regFileNext = new RegisterFile();
 
     Instruction[] Buf1 = new Instruction[8];
     InstLoadStore[] Buf2 = new InstLoadStore[2];
     InstCat4[] Buf3 = new InstCat4[2];
     InstCat4[] Buf4 = new InstCat4[2];
     Instruction[] Buf5 = new Instruction[2];
+
     InstLoadStore Buf6;
     InstCat4 Buf7;
     InstCat4 Buf8;
@@ -1064,6 +1057,60 @@ class Processor {
     InstLW Buf10;
     InstCat4 Buf11;
     InstCat4 Buf12;
+
+    InstCat1 waitingBranch;
+    InstCat1 executedBranch;
+
+    // consolidate all the non-null entries of array so they are contiguous at
+    // the beginning of the array.
+    public static void consolidate(Object[] array) {
+        int index = Processor.firstNullIndex(array);
+        if (index < 0) return;
+        for (int k = index + 1; k < array.length; ++k) {
+            if (array[k] != null) {
+                array[index] = array[k];
+                array[k] = null;
+                index = Processor.firstNullIndex(array, index + 1);
+            }
+        }
+    }
+
+    public static void copyRefs(Object[] dest, Object[] source) {
+        int end;
+        if (source.length < dest.length) end = source.length;
+        else end = dest.length;
+        consolidate(source);
+        for (int k = 0; k < end; ++k) {
+            dest[k] = source[k];
+        }
+    }
+
+    public static void copy(ProcessorState dest, ProcessorState source) {
+        dest.pc = source.pc;
+        RegisterFile.copy(dest.regFile, source.regFile);
+
+        copyRefs(dest.Buf1, source.Buf1);
+        copyRefs(dest.Buf2, source.Buf2);
+        copyRefs(dest.Buf3, source.Buf3);
+        copyRefs(dest.Buf4, source.Buf4);
+        copyRefs(dest.Buf5, source.Buf5);
+
+        dest.Buf6 = source.Buf6;
+        dest.Buf7 = source.Buf7;
+        dest.Buf8 = source.Buf8;
+        dest.Buf9 = source.Buf9;
+        dest.Buf10 = source.Buf10;
+        dest.Buf11 = source.Buf11;
+        dest.Buf12 = source.Buf12;
+
+        dest.waitingBranch = source.waitingBranch;
+        dest.executedBranch = source.executedBranch;
+    }
+}
+class Processor {
+    Memory memory;
+    ProcessorState state = new ProcessorState();
+    ProcessorState stateNext = new ProcessorState();
 
     public Processor(Memory memory) {
         this.memory = memory;
@@ -1073,13 +1120,15 @@ class Processor {
         this(new Memory(pathString));
     }
 
-    public static <T extends Object> T getFirstNonNull(T[] array) {
-        int k = 0;
-        for (; k < array.length && array[k] == null; ++k) {}
-        if (k >= array.length) return null;
-        T entry = array[k];
-        array[k] = null;
-        return entry;
+    public static int firstNonNullIndex(Object[] array, int start) {
+        for (int k = start; k < array.length; ++k) {
+            if (array[k] != null) return k;
+        }
+        return -1;
+    }
+
+    public static int firstNonNullIndex(Object[] array) {
+        return firstNonNullIndex(array, 0);
     }
 
     public static int firstNullIndex(Object[] array, int start) {
@@ -1093,26 +1142,12 @@ class Processor {
         return firstNullIndex(array, 0);
     }
 
-    // consolidate all the non-null entries of array so they are contiguous at
-    // the beginning of the array.
-    public static void consolidate(Object[] array) {
-        int index = firstNullIndex(array);
-        if (index < 0) return;
-        for (int k = index + 1; k < array.length; ++k) {
-            if (array[k] != null) {
-                array[index] = array[k];
-                array[k] = null;
-                index = k;
-            }
-        }
-    }
-
-    public boolean rawPresent(int address, int src1, int src2) {
-        int dest;
-        for (Instruction inst : Buf1) {
-            if (inst == null) continue;
-            if (inst.address() >= address) return false;
-            dest = inst.dest();
+    public static boolean rawPresent(Instruction[] buf, Instruction input, int end) {
+        int dest, src1 = input.src1(), src2 = input.src2();
+        for (int k = 0; k < end; ++k) {
+            if (buf[k] == null) continue;
+            dest = buf[k].dest();
+            if (dest < 0) continue;
             if (RegisterFile.LO_HI_INDEX == dest) {
                 if (RegisterFile.LO_INDEX == src1 || RegisterFile.HI_INDEX == src1
                  || RegisterFile.LO_INDEX == src2 || RegisterFile.HI_INDEX == src2) {
@@ -1126,64 +1161,70 @@ class Processor {
         return false;
     }
 
-    InstCat1 waitingBranch;
-    InstCat1 executedBranch;
 
     protected void tryExecWaitingBranch() {
-        if (null == waitingBranch) return;
-        if (regFile.getAwaiting(waitingBranch.src1())
-            || regFile.getAwaiting(waitingBranch.src2())) {
+        // We read from stateNext because a branch whose operands are available or
+        // immediate should be executed in the same cycle it was fetched.
+        if (null == stateNext.waitingBranch) return;
+        InstCat1 inst = stateNext.waitingBranch;
+        if (state.regFile.getAwaiting(inst.src1()) || state.regFile.getAwaiting(inst.src2())) {
             return;
         }
-        if (rawPresent(waitingBranch.address(), waitingBranch.src1(), waitingBranch.src2()))
+        if (rawPresent(stateNext.Buf1, inst, stateNext.Buf1.length)) {
             return;
-        waitingBranch.src1val = regFile.get(waitingBranch.src1());
-        waitingBranch.src2val = regFile.get(waitingBranch.src2());
-        waitingBranch.execute();
-        pcNext = waitingBranch.result();
-        executedBranch = waitingBranch;
-        waitingBranch = null;
+        }
+        inst.src1val = state.regFile.get(inst.src1());
+        inst.src2val = state.regFile.get(inst.src2());
+        inst.execute();
+        stateNext.pc = inst.result();
+        stateNext.executedBranch = inst;
+        stateNext.waitingBranch = null;
     }
 
     protected boolean fetch() {
-        executedBranch = null;
-        consolidate(Buf1);
-        if (null != waitingBranch) {
+        stateNext.executedBranch = null;
+        if (null != state.waitingBranch) {
             tryExecWaitingBranch();
             return true;
         }
 
-        int index = firstNullIndex(Buf1);
+        int index = firstNullIndex(state.Buf1);
         if (index < 0) return true;
 
         Instruction inst;
         loop:
-            for (int addr = pc; addr < pc + 16 && index < Buf1.length && addr < memory.maxAddr()
-            ; addr += 4) {
-                inst = Instruction.decode(addr, memory.fetch(addr));
+            for (; stateNext.pc < state.pc + 16
+                    && index < state.Buf1.length
+                    && stateNext.pc < memory.maxAddr()
+                 ; stateNext.pc += 4)
+            {
+                inst = Instruction.decode(stateNext.pc, memory.fetch(stateNext.pc));
                 switch (inst.type()) {
                     case J:
                     case BEQ:
                     case BNE:
                     case BGTZ:
-                        waitingBranch = (InstCat1)inst;
+                        stateNext.waitingBranch = (InstCat1)inst;
                         tryExecWaitingBranch();
                         break loop;
                     case BREAK:
-                        executedBranch = (InstCat1)inst;
+                        stateNext.executedBranch = (InstCat1)inst;
                         return false;
                     default:
                         // put the instruction in Buf1.
-                        Buf1[index++] = inst;
+                        stateNext.Buf1[index++] = inst;
                 }
             }
         return true;
     }
 
     public boolean warPresent(int address, int dest) {
-        if (RegisterFile.LO_HI_INDEX == dest) {
+        if (dest < 0) {
+            return false;
+        }
+        else if (RegisterFile.LO_HI_INDEX == dest) {
             int src1, src2;
-            for (Instruction inst : Buf1) {
+            for (Instruction inst : state.Buf1) {
                 if (inst == null) continue;
                 if (inst.address() >= address) return false;
                 src1 = inst.src1();
@@ -1195,7 +1236,7 @@ class Processor {
             }
         }
         else {
-            for (Instruction inst : Buf1) {
+            for (Instruction inst : state.Buf1) {
                 if (inst == null) continue;
                 if (inst.address() >= address) return false;
                 if (inst.src1() == dest || inst.src2() == dest) {
@@ -1207,7 +1248,7 @@ class Processor {
     }
 
     public boolean earlierSW(int address) {
-        for (Instruction inst : Buf1) {
+        for (Instruction inst : state.Buf1) {
             if (inst == null) continue;
             if (inst.address() >= address) return false;
             if (inst.type() == InstType.SW) return true;
@@ -1216,141 +1257,151 @@ class Processor {
     }
 
     public void issueIfSpace(int k, Instruction[] buf) {
-        Instruction inst = Buf1[k];
+        Instruction inst = state.Buf1[k];
         // Check to see if there is space in the destination buffer.
         int index = firstNullIndex(buf);
         if (index < 0) return;
         // Read operands and update the scoreboard.
-        inst.src1val = regFile.get(inst.src1());
-        inst.src2val = regFile.get(inst.src2());
-        regFileNext.setAwaiting(inst.dest());
+        inst.src1val = state.regFile.get(inst.src1());
+        inst.src2val = state.regFile.get(inst.src2());
+        stateNext.regFile.setAwaiting(inst.dest());
         // Copy the instruction to the destination and remove it from the source.
         buf[index] = inst;
-        Buf1[k] = null;
+        stateNext.Buf1[k] = null;
     }
 
+
+    /* ALU2 instructions:
+        ADD, SUB, AND, OR, SRL, SRA,
+        ADDI, ANDI, ORI,
+        MFHI, MFLO
+    */
     public void issue() {
         Instruction inst;
-        for (int k = 0; k < Buf1.length; ++k) {
-            inst = Buf1[k];
+        for (int k = 0; k < state.Buf1.length; ++k) {
+            inst = state.Buf1[k];
             if (inst == null) continue;
-            if (regFile.getAwaiting(inst)) continue;
-            if (rawPresent(inst.address(), inst.src1(), inst.src2())
-                || warPresent(inst.address(), inst.dest())) continue;
+            if (state.regFile.getAwaiting(inst)) continue;
+            if (rawPresent(state.Buf1, inst, k) || warPresent(inst.address(), inst.dest())) continue;
             switch (inst.type()) {
                 case LW:
                 case SW:
                     if (earlierSW(inst.address())) continue;
-                    issueIfSpace(k, Buf2);
+                    issueIfSpace(k, stateNext.Buf2);
                     break;
                 case DIV:
-                    issueIfSpace(k, Buf3);
+                    issueIfSpace(k, stateNext.Buf3);
                     break;
                 case MULT:
-                    issueIfSpace(k, Buf4);
+                    issueIfSpace(k, stateNext.Buf4);
                     break;
                 default:
-                    issueIfSpace(k, Buf5);
+                    issueIfSpace(k, stateNext.Buf5);
             }
         }
     }
 
     public void alu2() {
-        Buf6 = getFirstNonNull(Buf2);
-        consolidate(Buf2);
-        if (null == Buf6) return;
-        Buf6.execute();
+        stateNext.Buf6 = null;
+        int k = firstNonNullIndex(state.Buf2);
+        if (k < 0) return;
+        stateNext.Buf6 = state.Buf2[k];
+        stateNext.Buf2[k] = null;
+        if (null == stateNext.Buf6) return;
+        stateNext.Buf6.execute();
     }
 
     public void mem() {
-        if (null == Buf6) return;
-        switch (Buf6.type()) {
+        stateNext.Buf10 = null;
+        if (null == state.Buf6) return;
+        InstLoadStore inst = state.Buf6;
+        switch (inst.type()) {
             case LW:
-                Buf6.data = memory.fetch(Buf6.result());
-                Buf10 = (InstLW)Buf6;
+                inst.data = memory.fetch(inst.result());
+                stateNext.Buf10 = (InstLW)inst;
                 break;
             case SW:
-                memory.store(Buf6.result(), regFile.get(Buf6.src2()));
+                memory.store(inst.result(), state.regFile.get(inst.src2()));
                 break;
             default:
                 throw new UnknownError("The entry in Buf6 is not a LW nor a SW.");
         }
-        Buf6 = null;
     }
 
     public void div() {
-        Buf7 = getFirstNonNull(Buf3);
-        consolidate(Buf3);
-        if (null == Buf7) return;
-        Buf7.execute();
+        stateNext.Buf7 = null;
+        int k = firstNonNullIndex(state.Buf3);
+        if (k < 0) return;
+        stateNext.Buf7 = state.Buf3[k];
+        stateNext.Buf3[k] = null;
+        if (null == stateNext.Buf7) return;
+        stateNext.Buf7.execute();
     }
 
     public void mul1() {
-        Buf8 = getFirstNonNull(Buf4);
-        consolidate(Buf4);
-        if (null == Buf8) return;
-        Buf8.execute();
+        stateNext.Buf8 = null;
+        int k = firstNonNullIndex(state.Buf4);
+        if (k < 0) return;
+        stateNext.Buf8 = state.Buf4[k];
+        stateNext.Buf4[k] = null;
+        if (null == stateNext.Buf8) return;
+        stateNext.Buf8.execute();
     }
 
     public void alu1() {
-        Buf9 = getFirstNonNull(Buf5);
-        consolidate(Buf5);
-        if (null == Buf9) return;
-        Buf9.execute();
+        stateNext.Buf9 = null;
+        int k = firstNonNullIndex(state.Buf5);
+        if (k < 0) return;
+        Instruction inst = state.Buf5[k];
+        stateNext.Buf9 = inst;
+        stateNext.Buf5[k] = null;
+        if (null == inst) return;
+        inst.execute();
     }
 
     public void mul2() {
-        Buf11 = Buf8;
-        Buf8 = null;
+        stateNext.Buf11 = state.Buf8;
     }
 
     public void mul3() {
-        Buf12 = Buf11;
-        Buf11 = null;
+        stateNext.Buf12 = state.Buf11;
     }
 
     public void writeBack() {
-        if (Buf10 != null) {
-            regFileNext.set(Buf10.dest(), Buf10.data);
-            Buf10 = null;
+        if (state.Buf10 != null) {
+            stateNext.regFile.set(state.Buf10.dest(), state.Buf10.data);
         }
-        if (Buf7 != null) {
-            regFileNext.set(RegisterFile.LO_INDEX, Buf7.lo());
-            regFileNext.set(RegisterFile.HI_INDEX, Buf7.hi());
-            Buf7 = null;
+        if (state.Buf7 != null) {
+            stateNext.regFile.set(RegisterFile.LO_INDEX, state.Buf7.lo());
+            stateNext.regFile.set(RegisterFile.HI_INDEX, state.Buf7.hi());
         }
-        if (Buf12 != null) {
-            regFileNext.set(RegisterFile.LO_INDEX, Buf12.lo());
-            regFileNext.set(RegisterFile.HI_INDEX, Buf12.hi());
-            Buf12 = null;
+        if (state.Buf12 != null) {
+            stateNext.regFile.set(RegisterFile.LO_INDEX, state.Buf12.lo());
+            // The state of hi must always to 0 to be consistent with the sample simulation.
+            stateNext.regFile.set(RegisterFile.HI_INDEX, 0);
         }
-        if (Buf9 != null) {
-            regFileNext.set(Buf9.dest(), Buf9.result());
-            Buf9 = null;
+        if (state.Buf9 != null) {
+            stateNext.regFile.set(state.Buf9.dest(), state.Buf9.result());
         }
     }
 
-    int cycle = 1;
-
     public String simulate() {
         StringBuilder builder = new StringBuilder(8096);
-        int cycle = 0;
-        // The reverse method is used to emulate concurrency.
-        do {
-            if (cycle > 72) break; // DEBUG
-            pc = pcNext;
-            RegisterFile.copy(regFile, regFileNext);
-            builder.append(cycleSnapshot(cycle++));
-            writeBack();
-            mem();
-            alu2();
-            div();
-            mul3();
-            mul2();
-            mul1();
-            alu1();
+        int cycle = 1;
+        while (fetch()) {
             issue();
-        } while (fetch());
+            alu2();
+            mem();
+            div();
+            mul1();
+            mul2();
+            mul3();
+            alu1();
+            writeBack();
+            ProcessorState.copy(state, stateNext);
+            builder.append(cycleSnapshot(cycle++));
+        }
+        ProcessorState.copy(state, stateNext);
         builder.append(cycleSnapshot(cycle++));
         return builder.toString().trim();
     }
@@ -1358,7 +1409,7 @@ class Processor {
     public String getGprState(int index) {
         String[] values = new String[8];
         for (int k = 0; k < 8; ++k, ++index) {
-            values[k] = Integer.toString(regFile.get(index));
+            values[k] = Integer.toString(state.regFile.get(index));
         }
         return String.join("\t", values);
     }
@@ -1392,61 +1443,61 @@ class Processor {
 
         builder.append("IF:" + newLine);
         builder.append(String.format("\tWaiting:"));
-        if (waitingBranch != null)
-            builder.append(String.format(" [%s]%n", waitingBranch.disassemble()));
+        if (state.waitingBranch != null)
+            builder.append(String.format(" [%s]%n", state.waitingBranch.disassemble()));
         else
             builder.append(newLine);
-        builder.append("\tExecuted: ");
-        if (executedBranch != null)
-            builder.append(String.format(" [%s]%n", executedBranch.disassemble()));
+        builder.append("\tExecuted:");
+        if (state.executedBranch != null)
+            builder.append(String.format(" [%s]%n", state.executedBranch.disassemble()));
         else
             builder.append(newLine);
 
-        bufferSnapshot(builder, Buf1, "Buf1");
-        bufferSnapshot(builder, Buf2, "Buf2");
-        bufferSnapshot(builder, Buf3, "Buf3");
-        bufferSnapshot(builder, Buf4, "Buf4");
-        bufferSnapshot(builder, Buf5, "Buf5");
+        bufferSnapshot(builder, state.Buf1, "Buf1");
+        bufferSnapshot(builder, state.Buf2, "Buf2");
+        bufferSnapshot(builder, state.Buf3, "Buf3");
+        bufferSnapshot(builder, state.Buf4, "Buf4");
+        bufferSnapshot(builder, state.Buf5, "Buf5");
 
         builder.append("Buf6:");
-        if (null != Buf6)
-            builder.append(String.format(" [%s]%n", Buf6.disassemble()));
+        if (null != state.Buf6)
+            builder.append(String.format(" [%s]%n", state.Buf6.disassemble()));
         else
             builder.append(newLine);
 
         builder.append("Buf7:");
-        if (null != Buf7)
-            builder.append(String.format(" [%d, %d]%n", Buf7.hi(), Buf7.lo()));
+        if (null != state.Buf7)
+            builder.append(String.format(" [%d, %d]%n", state.Buf7.hi(), state.Buf7.lo()));
         else
             builder.append(newLine);
         
         builder.append("Buf8:");
-        if (null != Buf8)
-            builder.append(String.format(" [%s]%n", Buf8.disassemble()));
+        if (null != state.Buf8)
+            builder.append(String.format(" [%s]%n", state.Buf8.disassemble()));
         else
             builder.append(newLine);
 
         builder.append("Buf9:");
-        if (null != Buf9)
-            builder.append(String.format(" [%d, R%d]%n", Buf9.result(), Buf9.dest()));
+        if (null != state.Buf9)
+            builder.append(String.format(" [%d, R%d]%n", state.Buf9.result(), state.Buf9.dest()));
         else
             builder.append(newLine);
 
         builder.append("Buf10:");
-        if (null != Buf10)
-            builder.append(String.format(" [%d, R%d]%n", Buf10.data, Buf10.dest()));
+        if (null != state.Buf10)
+            builder.append(String.format(" [%d, R%d]%n", state.Buf10.data, state.Buf10.dest()));
         else
             builder.append(newLine);
 
         builder.append("Buf11:");
-        if (null != Buf11)
-            builder.append(String.format(" [%s]%n", Buf11.disassemble()));
+        if (null != state.Buf11)
+            builder.append(String.format(" [%s]%n", state.Buf11.disassemble()));
         else
             builder.append(newLine);
 
         builder.append("Buf12:");
-        if (null != Buf12)
-            builder.append(String.format(" [%d]%n", Buf12.result()));
+        if (null != state.Buf12)
+            builder.append(String.format(" [%d]%n", state.Buf12.lo()));
         else
             builder.append(newLine);
 
@@ -1455,8 +1506,8 @@ class Processor {
         for (int k = 0; k < 32; k += 8) {
             builder.append(String.format("R%02d:\t%s%n", k, getGprState(k)));
         }
-        builder.append(String.format("HI:\t%d%n", regFile.hi()));
-        builder.append(String.format("LO:\t%d%n", regFile.lo()));
+        builder.append(String.format("HI:\t%d%n", state.regFile.hi()));
+        builder.append(String.format("LO:\t%d%n", state.regFile.lo()));
         builder.append(newLine);
         builder.append("Data" + newLine);
         for (int k = memory.dataStartAddr(); k < memory.maxAddr(); k += 32) {

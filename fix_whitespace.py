@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-f = open('other_simulation.txt')
+f = open('proj1/other_simulation.txt')
 s = f.read()
 f.close()
 print(s

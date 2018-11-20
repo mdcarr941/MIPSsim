@@ -7,9 +7,9 @@
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopOnEntry": false,
-            "mainClass": "cda5155.proj1.MIPSsim",
-            "args": "",
-            "projectName": "proj1"
+            "mainClass": "cda5155.MIPSsim.MIPSsim",
+            "args": "proj2/sample.txt",
+            "projectName": "MIPSsim"
         }
     ]
 }

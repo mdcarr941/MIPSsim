@@ -4,14 +4,10 @@ import java.util.*;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-//import java.nio.file.Path;
-//import java.io.BufferedReader;
-//import java.io.PrintWriter;
-//import java.io.CharArrayWriter;
+import java.util.regex.Pattern;
 
 public class AppTest 
     extends TestCase
@@ -229,24 +225,27 @@ public class AppTest
     }
 
     public void testConsolidate() {
-        String[] buf = new String[] {"a", null, "b", null, "c"};
-        Processor.consolidate(buf);
+        String[] buf = new String[] {null, "a", null, "b", null, null, "c"};
+        ProcessorState.consolidate(buf);
         assertEquals("a", buf[0]);
         assertEquals("b", buf[1]);
         assertEquals("c", buf[2]);
         assertEquals(null, buf[3]);
         assertEquals(null, buf[4]);
+        assertEquals(null, buf[5]);
+        assertEquals(null, buf[6]);
 
         String[] bufClone = buf.clone();
-        Processor.consolidate(buf);
+        ProcessorState.consolidate(buf);
         for (int k = 0; k < buf.length; ++k) {
             assertEquals(bufClone[k], buf[k]);
         }
-    }
 
-    public void testGetFirstNonNull() {
-        String[] buf = new String[] {null, null, "a", null, "b"};
-        assertEquals("a", Processor.getFirstNonNull(buf));
+        buf = new String[] {"a"};
+        ProcessorState.consolidate(buf);
+        assertEquals("a", buf[0]);
+
+        ProcessorState.consolidate(new String[0]);
     }
 
     public static String changeLineSep(String input) {
@@ -255,12 +254,22 @@ public class AppTest
 
     public static String getFileContents(String pathString) throws IOException {
         List<String> lines = Files.readAllLines(Paths.get(pathString));
-        StringBuilder builder = new StringBuilder();
         int end = lines.size();
+        StringBuilder builder = new StringBuilder(100 * end);
         for (int k = 0; k < end; ++k) {
             builder.append(lines.get(k) + '\n');
         }
         return changeLineSep(builder.toString()).trim();
+    }
+
+    public static void assertEqualsModLws(String left, String right) {
+        Pattern pattern = Pattern.compile("\\s+");
+        String[] leftTokens = pattern.split(left);
+        String[] rightTokens = pattern.split(right);
+        assertEquals(leftTokens.length, rightTokens.length);
+        for (int k = 0; k < leftTokens.length; ++k) {
+            assertEquals(leftTokens[k], rightTokens[k]);
+        }
     }
 
     public static void testDisassemble(String input, String output, String expected) throws IOException {
@@ -276,20 +285,12 @@ public class AppTest
         Processor proc = new Processor(input);
         String simulation = proc.simulate();
         MIPSsim.write2file(simulation, output);
-        assertEquals(expectedSim, simulation);
+        assertEqualsModLws(expectedSim, simulation);
     }
 
     public static void testMemoryDisassemble() throws IOException {
         testDisassemble("proj1/sample.txt", "proj1/disassembly.txt", "proj1/sample_disassembly.txt");
     }
-
-    // public void testProcessorSimulate() throws IOException {
-    //     String expected = getFileContents("proj1/sample_simulation.txt");
-    //     Processor proc = new Processor("proj1/sample.txt");
-    //     String simulation = proc.simulate();
-    //     MIPSsim.write2file(simulation, "proj1/simulation.txt");
-    //     assertEquals(expected, simulation);
-    // }
 
     public static void testOtherSampleDisassembly() throws IOException {
         testDisassemble("proj1/other_sample.txt", "proj1/other_disassembly_mine.txt", "proj1/other_disassembly.txt");
@@ -298,14 +299,6 @@ public class AppTest
     public static void testProj2Disassembly() throws IOException {
         testDisassemble("proj2/sample.txt", "proj2/disassembly.txt", "proj2/sample_disassembly.txt");
     }
-
-    // public void testOtherSampleSimulation() throws IOException {
-    //     String expected = getFileContents("proj1/other_simulation_wsfixed.txt");
-    //     Processor proc = new Processor("proj1/other_sample.txt");
-    //     String simulation = proc.simulate();
-    //     MIPSsim.write2file(simulation, "proj1/other_simulation_mine.txt");
-    //     assertEquals(expected, simulation);
-    // }
 
     public void testProcessorSimulate() throws IOException {
         testSimulate("proj2/sample.txt", "proj2/simulation.txt", "proj2/sample_simulation.txt");
