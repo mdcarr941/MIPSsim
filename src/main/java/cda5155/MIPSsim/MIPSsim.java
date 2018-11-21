@@ -4,11 +4,15 @@
  /** 
   * A simulator for a pseudo-MIPS ISA.
   * Written by Matthew Carr on October 3, 2018.
+  * Update by Matthew Carr on November 20, 2018.
   */
 
 package cda5155.MIPSsim;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import java.io.PrintWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +31,8 @@ enum InstType {
 }
 
 abstract class Instruction {
+    public static final String assembleErrorMsg = "Cannot assemble instruction, unknown operation: ";
+
     protected int _address;
     int address() {
         return _address;
@@ -85,8 +91,16 @@ abstract class Instruction {
         return (word & 0xE0000000) >>> 29;
     }
 
+    public static int shiftCatCode(int catCode) {
+        return catCode << 29;
+    }
+
     public static int getSecond3Bits(int word) {
         return (word & 0x1C000000) >>> 26;
+    }
+
+    public static int shiftOpCode(int opCode) {
+        return opCode << 26;
     }
 
     protected static final String unknownInstMsg = "Unknown Instruction.";
@@ -134,16 +148,50 @@ abstract class Instruction {
         return (word & 0x03E00000) >> 21;
     }
 
+    public static int shiftFirstArg(int arg) {
+        return arg << 21;
+    }
+
+    public static int shiftFirstArg(String[] tokens) {
+        return shiftFirstArg(Integer.parseInt(tokens[1].substring(1)));
+    }
+
     public static int getSecondArg(int word) {
         return (word & 0x001F0000) >> 16;
+    }
+
+    public static int shiftSecondArg(int arg) {
+        return arg << 16;
+    }
+
+    public static int shiftSecondArg(String[] tokens) {
+        return shiftSecondArg(Integer.parseInt(tokens[2].substring(1)));
     }
 
     public static int getThirdArg(int word) {
         return (word & 0x0000F800) >> 11;
     }
 
+    public static int shiftThirdArg(int arg) {
+        return arg << 11;
+    }
+
+    public static int shiftThirdArg(String[] tokens) {
+        return shiftThirdArg(Integer.parseInt(tokens[3].substring(1)));
+    }
+
     public static short getSignedLower16(int word) {
         return (short)(word & 0x0000FFFF);
+    }
+
+    public static int parseImm(String token) {
+        if (token.startsWith("#")) token = token.substring(1);
+        return Short.toUnsignedInt(Short.parseShort(token));
+    }
+
+    public static int shiftSignedLower16(String token) {
+        if (token.startsWith("#")) token = token.substring(1);
+        return Short.toUnsignedInt((short)(Integer.parseInt(token) >> 2));
     }
 
     public static int getUnsignedLower16(int word) {
@@ -155,9 +203,58 @@ abstract class Instruction {
     public String toString() {
         return String.join("\t", Memory.word2string(_word), Integer.toString(_address), disassemble());
     }
+
+    public static String[] tokenize(String instruction) {
+        String[] fields = instruction.split("\\s+|,");
+        List<String> output = new ArrayList<String>(fields.length);
+        for (String field : fields) {
+            if (field.isEmpty()) continue;
+            output.add(field);
+        }
+        return output.toArray(new String[output.size()]);
+    }
+
+    public static String assembleString(String instruction) {
+        return Memory.word2string(assemble(tokenize(instruction)));
+    }
+
+    public static int assemble(String instruction) {
+        return assemble(tokenize(instruction));
+    }
+
+    public static String assembleError(String op) {
+        return String.format("%s: '%s'", assembleErrorMsg, op);
+    }
+
+    public static int assemble(String[] tokens) throws RuntimeException {
+        String op = tokens[0];
+        //J, BEQ, BNE, BGTZ, SW, LW, BREAK
+        if (op.equals("J") || op.equals("BEQ") || op.equals("BNE") || op.equals("BGTZ") || op.equals("SW") || op.equals("LW") || op.equals("BREAK")) {
+            return InstCat1.assemble(tokens);
+        }
+        // ADD, SUB, AND, OR, SRL, SRA
+        else if (op.equals("ADD") || op.equals("SUB") || op.equals("AND") || op.equals("OR") || op.equals("SRL") || op.equals("SRA")) {
+            return InstCat2.assemble(tokens);
+        }
+        // ADDI, ANDI, ORI
+        else if (op.equals("ADDI") || op.equals("ANDI") || op.equals("ORI")) {
+            return InstCat3.assemble(tokens);
+        }
+        // MULT, DIV
+        else if (op.equals("MULT") || op.equals("DIV")) {
+            return InstCat4.assemble(tokens);
+        }
+        // MFHI, MFLO
+        else if (op.equals("MFHI") || op.equals("MFLO")) {
+            return InstCat5.assemble(tokens);
+        }
+        throw new RuntimeException(assembleError(op));
+    }
 }
 
 abstract class InstCat1 extends Instruction {
+    public static final int catCode = 0;
+
     public InstCat1(int address, int word) {
         super(address, word);
     }
@@ -203,9 +300,24 @@ abstract class InstCat1 extends Instruction {
                 throw new IllegalArgumentException(unknownInstMsg);
         }
     }
+
+    public static int assemble(String[] tokens) {
+        int word;
+        String op = tokens[0];
+        //J, BEQ, BNE, BGTZ, SW, LW, BREAK
+        if (op.equals("J")) word = InstJ.assemble(tokens);
+        else if (op.equals("BEQ") || op.equals("BNE")) word = InstBranchCmpr.assemble(tokens);
+        else if (op.equals("BGTZ")) word = InstBGTZ.assemble(tokens);
+        else if (op.equals("SW") || op.equals("LW")) word = InstLoadStore.assemble(tokens);
+        else if (op.equals("BREAK")) word = InstBREAK.assemble(tokens);
+        else throw new RuntimeException(assembleError(op));
+        return shiftCatCode(catCode) | word;
+    }
 }
 
 class InstJ extends InstCat1 {
+    public static final int opCode = 0;
+
     protected int _target;
     int target() {
         return _target;
@@ -225,6 +337,12 @@ class InstJ extends InstCat1 {
     public String disassemble() {
         return String.format("J #%d", _target);
     }
+
+    public static int assemble(String[] tokens) {
+        int offset = Integer.parseInt(tokens[1].substring(1)) >>> 2;
+        return shiftOpCode(opCode) | offset;
+    }
+
 }
 
 class InstBranchCmpr extends InstCat1 {
@@ -306,9 +424,27 @@ class InstBranchCmpr extends InstCat1 {
         }
         return String.format("%s R%d, R%d, #%d", instString, _rs, _rt, _offset);
     }
+
+    public static int assemble(String[] tokens) {
+        String op = tokens[0];
+        int word;
+        if (op.equals("BEQ")) {
+            word = shiftOpCode(1);
+        }
+        else if (op.equals("BNE")) {
+            word = shiftOpCode(2);
+        }
+        else throw new RuntimeException(assembleError(op));
+        word |= shiftFirstArg(tokens);
+        word |= shiftSecondArg(tokens);
+        word |= shiftSignedLower16(tokens[3]);
+        return word;
+    }
 }
 
 class InstBGTZ extends InstCat1 {
+    public static final int opCode = 3;
+
     protected int _rs;
     int src1() {
         return _rs;
@@ -344,6 +480,10 @@ class InstBGTZ extends InstCat1 {
 
     public String disassemble() {
         return String.format("BGTZ R%d, #%d", _rs, _offset);
+    }
+
+    public static int assemble(String[] tokens) {
+        return shiftOpCode(opCode) | shiftFirstArg(tokens) | shiftSignedLower16(tokens[2]);
     }
 }
 
@@ -401,6 +541,27 @@ abstract class InstLoadStore extends InstCat1 {
         }
         return String.format("%s R%d, %d(R%d)", instString, _rt, _offset, _base);
     }
+
+    public static int assemble(String[] tokens) {
+        String op = tokens[0];
+        int word;
+        if (op.equals("SW")) {
+            word = shiftOpCode(4);
+        }
+        else if (op.equals("LW")) {
+            word = shiftOpCode(5);
+        }
+        else throw new RuntimeException(assembleError(op));
+        Pattern pattern = Pattern.compile("(\\d+)\\(R(\\d+)\\)");
+        Matcher matcher = pattern.matcher(tokens[2]);
+        if (!matcher.matches()) {
+            throw new RuntimeException("Invalid target address of branch: " + tokens[2]);
+        }
+        int baseReg = Integer.parseInt(matcher.group(2));
+        int rt = Integer.parseInt(tokens[1].substring(1));
+        short offset = Short.parseShort(matcher.group(1));
+        return word | shiftFirstArg(baseReg) | shiftSecondArg(rt) | offset;
+    }
 }
 
 class InstLW extends InstLoadStore {
@@ -424,6 +585,8 @@ class InstSW extends InstLoadStore {
 }
 
 class InstBREAK extends InstCat1 {
+    public static final int opCode = 6;
+
     public InstBREAK(int address, int word) {
         super(address, word);
         _type = InstType.BREAK;
@@ -436,9 +599,15 @@ class InstBREAK extends InstCat1 {
     public String disassemble() {
         return "BREAK";
     }
+
+    public static int assemble(String[] tokens) {
+        return shiftOpCode(opCode);
+    }
 }
 
 abstract class InstCat2 extends Instruction {
+    public static final int catCode = 1;
+
     protected int _dest;
     int dest() {
         return _dest;
@@ -499,6 +668,25 @@ abstract class InstCat2 extends Instruction {
                 throw new IllegalArgumentException(unknownInstMsg);
         }
     }
+
+    public static int assemble(String[] tokens) {
+        String op = tokens[0];
+        int opCode;
+        // ADD, SUB,  AND, OR
+        if (op.equals("ADD") || op.equals("SUB") || op.equals("AND") || op.equals("OR")) {
+            opCode = InstArithType.assemble(tokens);
+        }
+        // SRL, SRA
+        else if (op.equals("SRL") || op.equals("SRA")) {
+            opCode = InstBitShift.assemble(tokens);
+        }
+        else throw new RuntimeException(assembleError(op));
+        return shiftCatCode(catCode) | opCode | assembleArgs(tokens);
+    }
+
+    public static int assembleArgs(String[] tokens) {
+        return shiftFirstArg(tokens) | shiftSecondArg(tokens) | shiftThirdArg(tokens);
+    }
 }
 
 class InstArithType extends InstCat2 {
@@ -549,6 +737,17 @@ class InstArithType extends InstCat2 {
         }
         return String.format("%s R%d, R%d, R%d", typeString, _dest, _src1, _src2);
     }
+
+    public static int assemble(String[] tokens) {
+        String op = tokens[0];
+        int opCode;
+        if (op.equals("ADD")) opCode = 0;
+        else if (op.equals("SUB")) opCode = 1;
+        else if (op.equals("AND")) opCode = 2;
+        else if (op.equals("OR")) opCode = 3;
+        else throw new RuntimeException(assembleError(op));
+        return shiftOpCode(opCode);
+    }
 }
 
 class InstBitShift extends InstCat2 {
@@ -587,9 +786,20 @@ class InstBitShift extends InstCat2 {
         }
         return String.format("%s R%d, R%d, #%d", typeString, _dest, _src1, _src2);
     }
+
+    public static int assemble(String[] tokens) {
+        String op = tokens[0];
+        int opCode;
+        if (op.equals("SRL")) opCode = 4;
+        else if (op.equals("SRA")) opCode = 5;
+        else throw new RuntimeException(assembleError(op));
+        return shiftOpCode(opCode);
+    }
 }
 
 abstract class InstCat3 extends Instruction {
+    public static final int catCode = 2;
+
     protected int _dest;
     int dest() {
         return _dest;
@@ -630,6 +840,17 @@ abstract class InstCat3 extends Instruction {
             default:
                 throw new IllegalArgumentException(unknownInstMsg);
         }
+    }
+
+    public static int assemble(String[] tokens) {
+        String op = tokens[0];
+        int opCode;
+        if (op.equals("ADDI")) opCode = 0;
+        else if (op.equals("ANDI")) opCode = 1;
+        else if (op.equals("ORI")) opCode = 2;
+        else throw new RuntimeException(assembleError(op));
+        return shiftCatCode(catCode) | shiftOpCode(opCode) | shiftFirstArg(tokens)
+            | shiftSecondArg(tokens) | parseImm(tokens[3]);
     }
 }
 
@@ -702,6 +923,7 @@ class InstLogicalImm extends InstCat3 {
 }
 
 class InstCat4 extends Instruction {
+    public static final int catCode = 3;
     protected String _errMsg;
 
     int dest() {
@@ -783,9 +1005,19 @@ class InstCat4 extends Instruction {
         }
         return String.format("%s R%d, R%d", typeString, _src1, _src2);
     }
+
+    public static int assemble(String[] tokens) {
+        String op = tokens[0];
+        int opCode;
+        if (op.equals("MULT")) opCode = 0;
+        else if (op.equals("DIV")) opCode = 1;
+        else throw new RuntimeException(assembleError(op));
+        return shiftCatCode(catCode) | shiftOpCode(opCode) | shiftFirstArg(tokens) | shiftSecondArg(tokens);
+    }
 }
 
 abstract class InstCat5 extends Instruction {
+    public static final int catCode = 4;
     protected int _dest;
     int dest() {
         return _dest;
@@ -837,6 +1069,15 @@ abstract class InstCat5 extends Instruction {
         }
         return String.format("%s R%d", typeString, _dest);
     }
+
+    public static int assemble(String[] tokens) {
+        String op = tokens[0];
+        int opCode;
+        if (op.equals("MFHI")) opCode = 0;
+        else if (op.equals("MFLO")) opCode = 1;
+        else throw new RuntimeException(assembleError(op));
+        return shiftCatCode(catCode) | shiftOpCode(opCode) | shiftFirstArg(tokens);
+    }
 }
 
 class InstMFHI extends InstCat5 {
@@ -856,6 +1097,30 @@ class InstMFLO extends InstCat5 {
 
     public InstMFLO(int address, int word) {
         super(address, word);
+    }
+}
+
+// This class was created to aid in debugging.
+class Assembler {
+    public static List<String> run(String inputPath) throws IOException {
+        List<String> lines = Files.readAllLines(Paths.get(inputPath));
+        List<String> output = new ArrayList<String>(lines.size());
+        int k = 0;
+        String line;
+        for (; k < lines.size(); ++k) {
+            line = lines.get(k);
+            output.add(Instruction.assembleString(line));
+            if (line.equals("BREAK")) {
+                ++k;
+                break;
+            }
+        }
+        int word;
+        for (; k < lines.size(); ++k) {
+            word = Integer.parseInt(lines.get(k));
+            output.add(Memory.word2string(word));
+        }
+        return output;
     }
 }
 
@@ -1270,7 +1535,6 @@ class Processor {
         stateNext.Buf1[k] = null;
     }
 
-
     /* ALU2 instructions:
         ADD, SUB, AND, OR, SRL, SRA,
         ADDI, ANDI, ORI,
@@ -1553,12 +1817,13 @@ public class MIPSsim {
 
         try {
             Memory memory = new Memory(inputPath);
-            try {
-                writeDisassembly(memory.disassemble());
-            }
-            catch (IOException e) {
-                System.err.println("Failed to write dissassembly to file: " + DISASSEMBLY_NAME);
-            }
+            // No disassembly file was requested for project 2.
+            // try {
+            //     writeDisassembly(memory.disassemble());
+            // }
+            // catch (IOException e) {
+            //     System.err.println("Failed to write dissassembly to file: " + DISASSEMBLY_NAME);
+            // }
             Processor proc = new Processor(memory);
             try {
                 writeSimulation(proc.simulate());

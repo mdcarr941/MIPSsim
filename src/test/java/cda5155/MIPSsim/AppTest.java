@@ -1,13 +1,14 @@
 package cda5155.MIPSsim;
 
 import java.util.*;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.regex.Pattern;
 
 public class AppTest 
     extends TestCase
@@ -216,6 +217,10 @@ public class AppTest
         assertEquals("00001100101000000000000000000001\t288\tBGTZ R5, #4",
             Instruction.decode(288, "00001100101000000000000000000001").toString()
         );
+        //System.out.println(Instruction.decode(288, "00001100101000000011111111111111").toString());
+        // assertEquals("00001100101000000011111111111111\t288\tBGTZ R5, #-4",
+        //     Instruction.decode(288, "00001100101000000011111111111111").toString()
+        // );
     }
 
     public void testInstBREAK() {
@@ -246,6 +251,13 @@ public class AppTest
         assertEquals("a", buf[0]);
 
         ProcessorState.consolidate(new String[0]);
+    }
+
+    public static void testAssembler() throws IOException {
+        String expected = getFileContents("proj2/sample.txt");
+        List<String> lines = Assembler.run("proj2/sample.mips");
+        String assembled = String.join(MIPSsim.LINE_SEP, lines);
+        assertEquals(expected, assembled);
     }
 
     public static String changeLineSep(String input) {
@@ -288,6 +300,12 @@ public class AppTest
         assertEqualsModLws(expectedSim, simulation);
     }
 
+    public static void testSimulateOnProj1OtherSample() throws IOException {
+        Processor proc = new Processor("proj1/other_sample.txt");
+        String simulation = proc.simulate();
+        MIPSsim.write2file(simulation, "proj1/other_simulation_new.txt");
+    }
+
     public static void testMemoryDisassemble() throws IOException {
         testDisassemble("proj1/sample.txt", "proj1/disassembly.txt", "proj1/sample_disassembly.txt");
     }
@@ -300,7 +318,77 @@ public class AppTest
         testDisassemble("proj2/sample.txt", "proj2/disassembly.txt", "proj2/sample_disassembly.txt");
     }
 
-    public void testProcessorSimulate() throws IOException {
+    public static void testProcessorSimulate() throws IOException {
         testSimulate("proj2/sample.txt", "proj2/simulation.txt", "proj2/sample_simulation.txt");
+    }
+
+    public static <T> void assertAllEqual(T[] left, T[] right) {
+        assertEquals(left.length, right.length);
+        for (int k = 0; k < left.length; ++k) {
+            assertEquals(left[k], right[k]);
+        }
+    }
+
+    public static void testTokenize() {
+        assertAllEqual(new String[] {"ADD", "R1", "R2", "R2"}, Instruction.tokenize("ADD R1, R2, R2"));
+        assertAllEqual(new String[] {"J", "#268"}, Instruction.tokenize("J #268"));
+        assertAllEqual(new String[] {"LW", "R3", "316(R6)"}, Instruction.tokenize("LW R3, 316(R6)"));
+        assertAllEqual(new String[] {"MFLO", "R5"}, Instruction.tokenize("MFLO R5"));
+        assertAllEqual(new String[] {"ADDI", "R6", "R6", "#4"}, Instruction.tokenize("ADDI R6, R6, #4"));
+    }
+
+    public static void printAlignedStrings(String top, String bottom) {
+        System.out.printf("%s%n%s%n", top, bottom);
+    }
+
+    public static void testInstLoadStoreRegex() {
+        String[] tokens = Instruction.tokenize("LW R4, 332(R6)");
+        Pattern pattern = Pattern.compile("(\\d+)\\(R(\\d+)\\)");
+        Matcher matcher = pattern.matcher(tokens[2]);
+        assertEquals(true, matcher.matches());
+        assertEquals("332", matcher.group(1));
+        assertEquals("6", matcher.group(2));
+    }
+
+    public static void testShort2Int() {
+        short x = -1;
+        assertEquals(Integer.toBinaryString(0x0000FFFF), Integer.toBinaryString(Short.toUnsignedInt(x)));
+    }
+
+    public static void testAssembleString() {
+        assertEquals("00000000000000000000000001000011", Instruction.assembleString("J #268"));
+        assertEquals("00000000000000000000000001000100", Instruction.assembleString("J #272"));
+        assertEquals("00000100001000100000000000001010", Instruction.assembleString("BEQ R1, R2, #40"));
+        assertEquals("00001000101000100000000000001011", Instruction.assembleString("BNE R5, R2, #44"));
+        assertEquals("00001000000011011111111111111010", Instruction.assembleString("BNE R0, R13, #-24"));
+        assertEquals("00001100101000000000000000000001", Instruction.assembleString("BGTZ R5, #4"));
+        assertEquals("00001100100000001111111111111101", Instruction.assembleString("BGTZ R4, #-12"));
+        assertEquals("00010100110001000000000101001100", Instruction.assembleString("LW R4, 332(R6)"));
+        assertEquals("00011000000000000000000000000000", Instruction.assembleString("BREAK"));
+        assertEquals("00100000110000000000000000000000", Instruction.assembleString("ADD R6, R0, R0"));
+        assertEquals("00100000001000000000000000000000", Instruction.assembleString("ADD R1, R0, R0"));
+        assertEquals("00100100001000100000000000000000", Instruction.assembleString("SUB R1, R2, R0"));
+        assertEquals("00101000001000100000000000000000", Instruction.assembleString("AND R1, R2, R0"));
+        assertEquals("00101100001000100000000000000000", Instruction.assembleString("OR R1, R2, R0"));
+        assertEquals("00110000001000100000000000000000", Instruction.assembleString("SRL R1, R2, R0"));
+        assertEquals("00110100001000100000000000000000", Instruction.assembleString("SRA R1, R2, R0"));
+        assertEquals("01000000010000000000000000000011", Instruction.assembleString("ADDI R2, R0, #3"));
+        assertEquals("01000100010000001000000000000000", Instruction.assembleString("ANDI R2, R0, #-32768"));
+        assertEquals("01001000010000000000000000000011", Instruction.assembleString("ORI R2, R0, #3"));
+        assertEquals("01100000011001000000000000000000", Instruction.assembleString("MULT R3, R4"));
+        assertEquals("01100100011001000000000000000000", Instruction.assembleString("DIV R3, R4"));
+        assertEquals("10000000011000000000000000000000", Instruction.assembleString("MFHI R3"));
+        assertEquals("10000100101000000000000000000000", Instruction.assembleString("MFLO R5"));
+    }
+
+    public static void testAssembledSimulation(String inputPath, String outputPath) throws IOException {
+        Memory memory = new Memory(Assembler.run(inputPath));
+        Processor proc = new Processor(memory);
+        String simulation = proc.simulate();
+        MIPSsim.write2file(simulation, outputPath);
+    }
+
+    public static void testProg1() throws IOException {
+        testAssembledSimulation("proj2/prog1.mips", "proj2/prog1.out");
     }
 }
